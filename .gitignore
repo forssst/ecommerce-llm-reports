@@ -1,0 +1,13 @@
+# Docker volumes (dane modeli i bazy)
+ollama_data/
+n8n_data/
+
+# Python
+__pycache__/
+*.py[cod]
+*.class
+venv/
+.env
+
+# Systemowe
+.DS_Store
