@@ -1,13 +1,36 @@
-# Docker volumes (dane modeli i bazy)
-ollama_data/
-n8n_data/
+# Sekrety
+.env
+.env.*
 
 # Python
 __pycache__/
 *.py[cod]
-*.class
 venv/
-.env
+.venv/
 
-# Systemowe
-.DS_Store
+# Node / frontend
+node_modules/
+dist/
+.vite/
+.cache/
+
+# Wolumeny i runtime (NIE commitować)
+data/
+uploads/
+metabase-data/
+ollama_data/
+plugins/
+.n8n/
+.n8n_config/
+n8n_config/
+
+# Kopie baz i duże pliki
+*.sqlite
+*.sqlite3
+*.db
+*.bak
+
+# Lokalne / generowane
+*.pdf
+file.json
+n8n-task-runners.json

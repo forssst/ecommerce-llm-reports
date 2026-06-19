@@ -1,8 +1,4 @@
-version: '3.8'
-
 services:
-
-
   ollama:
     image: ollama/ollama:latest
     container_name: ollama
@@ -13,24 +9,97 @@ services:
     ports:
       - "11434:11434"
 
-    deploy:
-      resources:
-         reservations:
-           devices:
-             - driver: nvidia
-               count: 1
-               capabilities: [gpu]
   n8n:
-    image: n8nio/n8n:latest
-    container_name: n8n_local
+    image: n8nio/n8n:2.15.1
+    container_name: n8n_local       # Wymuszamy roota w formacie UID:GID
     restart: always
     ports:
       - "5678:5678"
     environment:
-      - N8N_SECURE_COOKIE=false
+      - N8N_RUNNERS_ENABLED=true
+      - N8N_RUNNERS_MODE=external
+      - N8N_RUNNERS_BROKER_LISTEN_ADDRESS=0.0.0.0
+      - N8N_RUNNERS_AUTH_TOKEN=2026k
+      - N8N_NATIVE_PYTHON_RUNNER=true
+      - N8N_BLOCK_FS_WRITE_ACCESS=false
+      - N8N_AI_ENABLED=true
+      - N8N_ENCRYPTION_KEY=2026n8n
     volumes:
-      - n8n_data:/home/node/.n8n
+      - ./n8n_config:/home/node/.n8n
+      - .:/home/node/data
 
+  task-runners:
+    build:
+      context: .
+      dockerfile: Dockerfile.runners # Wskazujemy nowy Dockerfile
+    container_name: n8n_runners
+    restart: always
+    environment:
+      - N8N_RUNNERS_TASK_BROKER_URI=http://n8n_local:5679
+      - N8N_RUNNERS_AUTH_TOKEN=2026k
+      # TA LINIA JEST KLUCZOWA:
+      - N8N_RUNNERS_CONFIG_FILE=/etc/n8n-task-runners.json
+    volumes:
+      - ./data:/home/node/csv_data
+      - ./metabase-data:/home/node/db_data
+    depends_on:
+      - n8n
+
+
+  metabase:
+    image: metabase/metabase:latest
+    container_name: metabase
+    restart: always
+    user: root
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./metabase-data:/metabase-data
+      - ./plugins:/plugins
+      - ./uploads:/mb-uploads:ro
+    environment:
+      - MB_DB_FILE=/metabase-data/metabase.db
+      - MB_PLUGINS_DIR=/plugins
+      - MB_DB_TYPE=h2
+      - JAVA_OPTS=-Xms256m -Xmx1g
+
+  streamlit:
+    image: python:3.11-slim
+    container_name: streamlit_app
+    restart: always
+    working_dir: /app
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./streamlit_app:/app
+    command: >
+      sh -c "pip install -q streamlit requests pandas &&
+             streamlit run app.py
+             --server.port=8501
+             --server.address=0.0.0.0
+             --server.headless=true"
+    depends_on:
+      - n8n
+
+    
+  fastapi_backend:
+    build: ./backend
+    container_name: fastapi_backend
+    restart: always
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/data
+      - ./uploads:/data/uploads
+      - ./streamlit_app/uploaded_dbs:/app/uploaded_dbs
+    environment:
+      - MB_URL=http://metabase:3000
+      - MB_PUBLIC_URL=${MB_PUBLIC_URL}
+      - MB_USER=${MB_USER}
+      - MB_PASS=${MB_PASS}
+      - MB_DATABASE_ID=${MB_DATABASE_ID}
+      - METABASE_DB_DIR=/mb-uploads
+    depends_on:
+      - n8n
 volumes:
   ollama_data:
-  n8n_data:

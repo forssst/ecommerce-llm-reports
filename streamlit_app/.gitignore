@@ -1,0 +1,10 @@
+venv/
+uploaded_dbs/
+streamlit_app/uploaded_dbs/
+metabase-data/
+n8n_config/
+plugins/
+*.bak
+__pycache__/
+data/system.db
+.env
