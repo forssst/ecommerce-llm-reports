@@ -8,6 +8,13 @@ services:
       - ollama_data:/root/.ollama
     ports:
       - "11434:11434"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
   n8n:
     image: n8nio/n8n:2.15.1
@@ -82,6 +89,19 @@ services:
       - n8n
 
     
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres_analytics
+    restart: always
+    environment:
+      - POSTGRES_DB=analytics
+      - POSTGRES_USER=analyst
+      - POSTGRES_PASSWORD=analyst
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
   fastapi_backend:
     build: ./backend
     container_name: fastapi_backend
@@ -90,16 +110,19 @@ services:
       - "8000:8000"
     volumes:
       - ./data:/data
-      - ./uploads:/data/uploads
-      - ./streamlit_app/uploaded_dbs:/app/uploaded_dbs
     environment:
       - MB_URL=http://metabase:3000
       - MB_PUBLIC_URL=${MB_PUBLIC_URL}
       - MB_USER=${MB_USER}
       - MB_PASS=${MB_PASS}
       - MB_DATABASE_ID=${MB_DATABASE_ID}
-      - METABASE_DB_DIR=/mb-uploads
+      - PG_HOST=postgres
+      - PG_DB=analytics
+      - PG_USER=analyst
+      - PG_PASS=analyst
     depends_on:
       - n8n
+      - postgres
 volumes:
   ollama_data:
+  postgres_data:
