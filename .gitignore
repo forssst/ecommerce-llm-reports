@@ -29,6 +29,12 @@ n8n_config/
 *.sqlite3
 *.db
 *.bak
+n8n_config.bak2/
+
+# Pliki danych do testów manualnych (pobrane/wygenerowane — dokumenty .md zostają)
+pliki_testowe/*.xls
+pliki_testowe/*.xlsx
+pliki_testowe/*.csv
 
 # Lokalne / generowane
 *.pdf

@@ -5,7 +5,9 @@ import uuid
 import sqlite3
 import shutil
 import json
+from string import Formatter
 from typing import Optional
+from datetime import datetime, timezone, timedelta
 
 import psycopg2
 from psycopg2 import sql as pgsql
@@ -14,15 +16,33 @@ import pandas as pd
 
 import requests as http
 import bcrypt
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from jose import jwt, JWTError
 
 import database
 import models
 
 models.Base.metadata.create_all(bind=database.engine)
+
+_PROMPTS_PATH = os.path.join(os.path.dirname(__file__), "prompts.json")
+with open(_PROMPTS_PATH, encoding="utf-8") as _f:
+    PROMPTS = json.load(_f)
+
+# Placeholdery, ktore kazdy prompt MUSI zawierac — zeby .format() w kodzie sie nie wywalil
+# po edycji promptu przez /prompts.
+_PROMPT_PLACEHOLDERS = {
+    "plan_prompt": {"types_instruction", "goal", "chart_type", "description", "schema_text"},
+    "sql_prompt": {"chart_hint", "goal", "schema_text"},
+    "sql_retry_suffix": {"sql", "err"},
+    "sql_prompt_sqlcoder": {"chart_hint", "goal", "schema_text"},
+    "sql_retry_suffix_sqlcoder": {"sql", "err"},
+    "describe_schema": {"schema_text"},
+    "enhance_prompt": {"description", "schema_text", "prompt", "clarification"},
+    "clarify_prompt": {"description", "schema_text", "goal"},
+}
 
 app = FastAPI(title="AI Data Analyst Backend")
 app.add_middleware(
@@ -40,8 +60,32 @@ METABASE_DB_DIR = os.getenv("METABASE_DB_DIR", "/data/uploads")
 UPLOAD_DIR = "/data/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+JWT_SECRET = os.getenv("JWT_SECRET", "zmien-mnie-na-cos-tajnego-w-produkcji")
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRE_HOURS = 24 * 7  # tydzień
+
+
+def _create_token(user_id: int, email: str) -> str:
+    expire = datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRE_HOURS)
+    return jwt.encode({"sub": str(user_id), "email": email, "exp": expire},
+                      JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def verify_token(authorization: str = Header(None)) -> int:
+    """Weryfikuje JWT i zwraca user_id. Używaj jako Depends() w chronionych endpointach."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Brak tokenu autoryzacji")
+    token = authorization.removeprefix("Bearer ")
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        return int(payload["sub"])
+    except (JWTError, KeyError, ValueError):
+        raise HTTPException(status_code=401, detail="Nieprawidłowy lub wygasły token")
+
+
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://ollama:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:7b")
+OLLAMA_SQL_MODEL = os.getenv("OLLAMA_SQL_MODEL", "qwen2.5-coder:7b")
 N8N_DASHBOARD_URL = os.getenv("N8N_DASHBOARD_URL", "http://n8n_local:5678/webhook/create-dashboard")
 
 PG_HOST = os.getenv("PG_HOST", "postgres")
@@ -83,6 +127,20 @@ class GenerateIn(BaseModel):
     n8n_timeout: int = 120
 
 
+_RELATIVE_DATE_FILTER = re.compile(r'(?i)(current_date|now\(\))\s*[-+]\s*interval')
+
+# Znaki spoza polskiego alfabetu: CJK, cyrylica oraz łacińskie diakrytyki innych języków
+# (np. węgierskie á/ő/ű, niemieckie ä/ß, czeskie š/č). Polskie ąćęłńóśźż są dozwolone.
+_FOREIGN_CHARS = re.compile(
+    r'[一-鿿぀-ゟ゠-ヿ가-힯а-яА-ЯёЁáàâäãåéèêëíìîïöőõòôúùûüűñçßýÿæøšžčřěůďťň]',
+    re.IGNORECASE)
+
+
+def _is_foreign_language(text: str) -> bool:
+    """True gdy tekst zawiera znaki spoza polskiego alfabetu (model dryfuje w obcy język)."""
+    return bool(_FOREIGN_CHARS.search(text or ""))
+
+
 def _parse_requested_charts(text: str) -> list:
     """Wyciąga listę typów wykresów z tekstu konfiguracji w kolejności wystąpienia."""
     t = text.lower()
@@ -93,6 +151,11 @@ def _parse_requested_charts(text: str) -> list:
         ("table", ["tabel", "table"]),
         ("area",  ["obszarow", "area"]),
         ("row",   ["poziom", "row"]),
+        ("scatter",     ["punktow", "scatter"]),
+        ("funnel",      ["lejkow", "funnel"]),
+        ("waterfall",   ["kaskadow", "waterfall"]),
+        ("smartscalar", ["licznik", "scalar"]),
+        ("combo",       ["kombinowan", "combo"]),
     ]
     found = []
     for chart_type, keywords in patterns:
@@ -166,6 +229,29 @@ def _inject_date_filter(sql: str, tag_name: str = "date_filter") -> str:
             return (before + sep + after) if has_where else (before + "\nWHERE 1=1" + sep + after)
     has_where = bool(re.search(r'\bWHERE\b', sql, re.IGNORECASE))
     return sql + ("\n" + clause if has_where else "\nWHERE 1=1\n" + clause)
+
+
+def _build_ddl_schema(schema_name: str) -> str:
+    """Buduje CREATE TABLE DDL w formacie którego oczekuje sqlcoder."""
+    try:
+        conn = _pg_conn()
+        lines = []
+        with conn.cursor() as cur:
+            cur.execute("""SELECT table_name FROM information_schema.tables
+                           WHERE table_schema=%s AND table_type='BASE TABLE'
+                           ORDER BY table_name""", (schema_name,))
+            tables = [r[0] for r in cur.fetchall()]
+            for table in tables:
+                cur.execute("""SELECT column_name, data_type
+                               FROM information_schema.columns
+                               WHERE table_schema=%s AND table_name=%s
+                               ORDER BY ordinal_position""", (schema_name, table))
+                cols = ", ".join(f"{c[0]} {c[1].upper()}" for c in cur.fetchall())
+                lines.append(f"CREATE TABLE {table} ({cols});")
+        conn.close()
+        return "\n".join(lines)
+    except Exception:
+        return ""
 
 
 def get_db_schema(schema_name: str) -> dict:
@@ -264,7 +350,62 @@ def _parse_chart_count(text: str) -> int:
     return int(m.group(1)) if m else 0
 
 
-def _run_and_validate(schema_name, sql):
+_NUMERIC_COL_SUFFIXES = (
+    "_id", "_lenght", "_length", "_qty", "_count",
+    "_size", "_weight", "_price", "_value", "_num",
+)
+
+
+_NUMERIC_COL_SUFFIXES = (
+    "_id", "_lenght", "_length", "_qty", "_count",
+    "_size", "_weight", "_price", "_value", "_num",
+)
+_CHART_TYPES_NUMERIC_FIRST_OK = {"smartscalar", "scatter"}
+
+
+def _check_label_column(cols, sample, chart_type=None):
+    """Zwraca komunikat błędu jeśli pierwsza kolumna (etykieta) wygląda jak metryka numeryczna.
+    Sprawdzamy tylko NAZWĘ kolumny — nie wartości, bo liczby całkowite mogą być kategoriami (np. review_score 1-5)."""
+    if chart_type in _CHART_TYPES_NUMERIC_FIRST_OK:
+        return None
+    if not cols:
+        return None
+    first_col = cols[0].lower()
+    if any(first_col.endswith(s) for s in _NUMERIC_COL_SUFFIXES):
+        return (
+            f"Kolumna '{cols[0]}' to metryka numeryczna, nie etykieta tekstowa. "
+            f"Użyj kolumny z nazwą/kategorią (np. product_category_name, customer_name) "
+            f"jako pierwszej kolumny — NIE kolumn kończących się na _id, _length, _lenght, _count itp."
+        )
+    return None
+
+
+def _hint_missing_column(schema_name: str, error_msg: str) -> str:
+    """Jeśli błąd to 'column X does not exist', dołącza listę dostępnych kolumn z PostgreSQL."""
+    m = re.search(r'column ["\w.]*?(\w+)["\w.]*? does not exist', error_msg, re.IGNORECASE)
+    if not m:
+        return error_msg
+    missing = m.group(1).lower()
+    try:
+        conn = _pg_conn()
+        with conn.cursor() as cur:
+            cur.execute("""SELECT table_name, column_name FROM information_schema.columns
+                           WHERE table_schema = %s ORDER BY table_name, ordinal_position""",
+                        (schema_name,))
+            rows = cur.fetchall()
+        conn.close()
+        by_table = {}
+        for tname, cname in rows:
+            by_table.setdefault(tname, []).append(cname)
+        available = "; ".join(f"{t}: {', '.join(c)}" for t, c in by_table.items())
+        return (f"{error_msg}\n"
+                f"Kolumna '{missing}' NIE ISTNIEJE w schemacie.\n"
+                f"Dostepne kolumny: {available}")
+    except Exception:
+        return error_msg
+
+
+def _run_and_validate(schema_name, sql, chart_type=None):
     """Sprawdza SQL na schemacie PostgreSQL i zwraca (ok, error, kolumny, próbka)."""
     if not schema_name:
         return True, None, [], []
@@ -275,9 +416,13 @@ def _run_and_validate(schema_name, sql):
             cols = [d[0] for d in cur.description] if cur.description else []
             sample = [list(r) for r in cur.fetchmany(5)]
         conn.close()
+        label_err = _check_label_column(cols, sample, chart_type)
+        if label_err:
+            return False, label_err, cols, sample
         return True, None, cols, sample
     except Exception as e:
-        return False, str(e), [], []
+        enriched = _hint_missing_column(schema_name, str(e))
+        return False, enriched, [], []
 
 
 def _infer_display(columns, sample):
@@ -435,13 +580,35 @@ def _full_prompt(g):
     return "\n".join(parts)
 
 
-def _ollama_json(prompt: str, timeout: int = 120):
+class OllamaUnavailableError(Exception):
+    pass
+
+
+class OllamaResponseError(Exception):
+    pass
+
+
+def _ollama_json(prompt: str, timeout: int = 120, model: str = None):
     """Bezposrednie wywolanie Ollamy z wymuszonym JSON-em."""
-    r = http.post(f"{OLLAMA_URL}/api/generate",
-                  json={"model": OLLAMA_MODEL, "prompt": prompt,
-                        "stream": False, "format": "json"}, timeout=timeout)
-    r.raise_for_status()
-    return json.loads((r.json().get("response") or "").strip())
+    used_model = model or OLLAMA_MODEL
+    try:
+        r = http.post(f"{OLLAMA_URL}/api/generate",
+                      json={"model": used_model, "prompt": prompt,
+                            "stream": False, "format": "json"}, timeout=timeout)
+        r.raise_for_status()
+    except http.exceptions.ConnectionError:
+        raise OllamaUnavailableError("Ollama jest niedostępna — sprawdź czy kontener ollama działa.")
+    except http.exceptions.Timeout:
+        raise OllamaUnavailableError(f"Ollama nie odpowiedziała w ciągu {timeout}s — model może być jeszcze ładowany.")
+    except http.exceptions.HTTPError as e:
+        raise OllamaResponseError(f"Ollama zwróciła błąd HTTP: {e}")
+    raw = (r.json().get("response") or "").strip()
+    if not raw:
+        raise OllamaResponseError("Ollama zwróciła pustą odpowiedź — spróbuj ponownie.")
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise OllamaResponseError(f"Odpowiedź Ollamy nie jest poprawnym JSON: {e}")
 
 
 def _generate_multichart(g, db, db_id):
@@ -459,25 +626,26 @@ def _generate_multichart(g, db, db_id):
     else:
         types_instruction = "Wygeneruj 3-4 roznorodne wykresy (bar, line, pie, table)."
 
-    plan_prompt = (
-        "Jestes analitykiem danych. Zaplanuj wykresy analityczne do dashboardu.\n"
-        f"{types_instruction}\n"
-        "ZASADY:\n"
-        "- Kazdy wykres musi miec INNY cel analityczny.\n"
-        "- W polu 'goal' napisz DOKLADNIE co pokazac i jakich kolumn uzyc jako etykiet vs wartosci.\n"
-        "- Jako etykiety uzyj kolumn TEXT z nazwami/kategoriami — NIGDY kolumn ID ani liczb.\n"
-        "- Jesli trzeba pokazac klientow/produkty/pracownikow — w 'goal' napisz explicite zeby uzyc JOIN i kolumny z nazwa (np. customers.companyname, products.productname).\n"
-        "- Jesli CEL zawiera slowa: trend/miesiac/rok/czas/timeline — MUSISZ dodac wykres z kolumna daty (chart_type: line lub bar) i opisac to w 'goal'.\n"
-        "- Dla trendow w 'goal' napisz: 'GROUP BY DATE_TRUNC(month/year, kolumna_daty)'.\n"
-        f"Zwroc WYLACZNIE JSON: {{\"charts\":[{{\"title\":\"...\",\"chart_type\":\"bar|line|pie|table\",\"goal\":\"...\"}}]}}\n"
-        "Nie pisz SQL.\n"
-        f"CEL: {g.prompt}\n"
-        f"WYTYCZNE: {g.chart_type}\n"
-        f"OPIS DANYCH: {g.description}\n"
-        f"SCHEMAT: {g.schema_text}"
+    plan_prompt = PROMPTS["plan_prompt"].format(
+        types_instruction=types_instruction,
+        goal=g.prompt,
+        chart_type=g.chart_type,
+        description=g.description,
+        schema_text=g.schema_text,
     )
     plan = _ollama_json(plan_prompt, g.n8n_timeout)
     raw_specs = [s for s in (plan.get("charts", []) if isinstance(plan, dict) else []) if isinstance(s, dict)]
+
+    # Model czasem generuje caly plan w obcym jezyku (widziane: wegierski) mimo polskiego
+    # promptu — wykryj znaki spoza polskiego alfabetu i powtorz planowanie raz z ostrzezeniem.
+    if raw_specs and any(_is_foreign_language(f"{s.get('title', '')} {s.get('goal', '')}") for s in raw_specs):
+        retry_plan = _ollama_json(
+            plan_prompt + "\nUWAGA: POPRZEDNI PLAN byl w obcym jezyku. Pola 'title' i 'goal' "
+                          "MUSZA byc napisane WYLACZNIE po polsku.",
+            g.n8n_timeout)
+        retry_specs = [s for s in (retry_plan.get("charts", []) if isinstance(retry_plan, dict) else []) if isinstance(s, dict)]
+        if retry_specs:
+            raw_specs = retry_specs
 
     # Nadpisz chart_type jeśli użytkownik podał konkretne typy
     specs = []
@@ -487,6 +655,9 @@ def _generate_multichart(g, db, db_id):
         specs.append(spec)
     if not specs:
         return None
+
+    is_sqlcoder = "sqlcoder" in OLLAMA_SQL_MODEL.lower()
+    sql_schema = _build_ddl_schema(g.db_path) if is_sqlcoder else g.schema_text
 
     _VALID_DISPLAYS = {"bar", "line", "pie", "table", "area", "row", "scatter",
                        "funnel", "smartscalar", "waterfall", "combo"}
@@ -506,39 +677,36 @@ def _generate_multichart(g, db, db_id):
         goal = spec.get("goal") or g.prompt
         if not title or title.lower().startswith("wykres"):
             title = goal[:60].strip()
+        # Ostatnia linia obrony: tytul nadal w obcym jezyku -> uzyj promptu uzytkownika
+        # (zawsze po polsku); 'goal' zostaje, bo SQL i tak powstaje z sensu, nie jezyka.
+        if _is_foreign_language(title):
+            title = (g.prompt or goal)[:60].strip()
         ctype = (spec.get("chart_type") or "").strip().lower() or None
         chart_hint = _CHART_HINTS.get(ctype, "")
         sql, ok, cols, sample, err = "", False, [], [], None
         for attempt in range(3):
-            sql_prompt = (
-                "Wygeneruj JEDEN poprawny SELECT (dialekt PostgreSQL) dla celu ponizej.\n"
-                "ZASADY — przestrzegaj wszystkich:\n"
-                "- Zwroc TYLKO jedno zapytanie SELECT. Zadnych srednikow w srodku, zadnych wielu instrukcji.\n"
-                "- Uzyj PELNYCH nazw tabel bez aliasow (np. Invoice.\"InvoiceDate\", nie i.\"InvoiceDate\").\n"
-                "  Jesli musisz uzyc aliasu, zdefiniuj go jawnie: FROM \"Invoice\" AS i.\n"
-                "- Jako etykiety (pierwsza kolumna) uzyj kolumn TEXT z nazwami/kategoriami.\n"
-                "- Kolumny konczace sie na '_id', '_lenght', '_length', '_qty', '_count', '_size', '_weight', '_price' to liczby/ID — NIE uzywaj jako etykiet.\n"
-                "- Jesli chcesz pokazac klientow/produkty/pracownikow po nazwie — uzyj JOIN: np. JOIN customers ON orders.customerid = customers.customerid i wybierz customers.companyname jako etykiete.\n"
-                "- NIGDY nie uzywaj samego ID (customerid, productid itp.) jako etykiety w wykresie.\n"
-                "- Agregaty: SUM(), COUNT(), AVG() na kolumnach numerycznych.\n"
-                "- Dla trendow czasowych: ZAWSZE grupuj po pelnym zakresie dat — NIGDY nie filtruj WHERE do konkretnego roku/miesiaca.\n"
-                "- Dla dat uzywaj PostgreSQL: DATE_TRUNC('month', kol_daty) AS miesiac  LUB  EXTRACT(YEAR FROM kol_daty)::int AS rok.\n"
-                "- Wyniki sortuj sensownie: daty ASC, wartosci DESC (TOP N).\n"
-                "- WAZNE: wszystkie nazwy tabel i kolumn sa MALYMI LITERAMI (pandas importuje jako lowercase). Pisz: orderdate, productname, customerid — NIE \"OrderDate\", NIE `OrderDate`.\n"
-                "- NIE uzywaj backtickow (`). Jezeli chcesz oznaczyc identyfikator, uzyj podwojnych cudzyslowow lub po prostu pisz bez zadnych cudzyslowow.\n"
-                + chart_hint +
-                "Zwroc WYLACZNIE JSON: {\"sql\":\"SELECT ...\"}\n"
-                f"CEL WYKRESU: {goal}\nSCHEMAT: {g.schema_text}"
+            prompt_key = "sql_prompt_sqlcoder" if is_sqlcoder else "sql_prompt"
+            retry_key  = "sql_retry_suffix_sqlcoder" if is_sqlcoder else "sql_retry_suffix"
+            sql_prompt = PROMPTS[prompt_key].format(
+                chart_hint=chart_hint,
+                goal=goal,
+                schema_text=sql_schema,
             )
             if err:
-                sql_prompt += f"\nPOPRZEDNI SQL nie zadzialal: {sql}\nBLAD: {err}\nPopraw blad i zwroc poprawiony JSON."
+                sql_prompt += PROMPTS[retry_key].format(sql=sql, err=err)
             try:
-                out = _ollama_json(sql_prompt, g.n8n_timeout)
+                out = _ollama_json(sql_prompt, g.n8n_timeout, model=OLLAMA_SQL_MODEL)
                 raw_sql = ((out.get("sql") if isinstance(out, dict) else "") or "").strip()
                 sql = _clean_sql(raw_sql)
             except Exception as e:
                 err = f"LLM: {e}"; total_retries += 1; continue
-            ok, verr, cols, sample = _run_and_validate(g.db_path, sql)
+            if _RELATIVE_DATE_FILTER.search(sql):
+                err = ("SQL uzywa CURRENT_DATE/NOW() z INTERVAL do filtrowania WHERE — to zwroci PUSTY "
+                       "wynik, bo dane moga byc z innego okresu niz biezaca data serwera. Usun ten "
+                       "filtr calkowicie i pokaz PELNY zakres dat z tabeli, bez WHERE na kolumnie daty.")
+                total_retries += 1
+                continue
+            ok, verr, cols, sample = _run_and_validate(g.db_path, sql, ctype)
             if ok and sql:
                 break
             err = verr or "pusty SQL"; total_retries += 1
@@ -560,12 +728,9 @@ def _generate_multichart(g, db, db_id):
             for t, s, d, c in charts
         ],
     }
-    # Próba przez n8n; jeśli workflow nie odpowie — bezpośrednie API Metabase jako backup
+    # Ścieżka GŁÓWNA: bezpośrednie API Metabase — tylko ona obsługuje filtr dat
+    # (workflow n8n buduje dashboard bez filtra). n8n zostaje jako fallback awaryjny.
     try:
-        n8n_r = http.post(N8N_DASHBOARD_URL, json=n8n_payload, timeout=120)
-        n8n_r.raise_for_status()
-        dash_url = n8n_r.json()["url"]
-    except Exception:
         mb_token = _get_metabase_token()
         mb_db_id = _ensure_metabase_db(mb_token, g.db_path)
         # Zawsze wymuszaj re-sync żeby Metabase odczytał aktualne typy kolumn (np. TIMESTAMP)
@@ -613,6 +778,10 @@ def _generate_multichart(g, db, db_id):
                      headers={"X-Metabase-Session": mb_token},
                      json={"cards": dashcards})
         dash_url = publish_metabase_dashboard(mb_token, dash_id)
+    except Exception:
+        n8n_r = http.post(N8N_DASHBOARD_URL, json=n8n_payload, timeout=120)
+        n8n_r.raise_for_status()
+        dash_url = n8n_r.json()["url"]
 
     pretty = json.dumps(
         {"dashboard_title": "Dashboard Analityczny AI",
@@ -624,6 +793,35 @@ def _generate_multichart(g, db, db_id):
     db.add(rec); db.commit()
     return {"status": "success", "sql": pretty, "retry_count": total_retries,
             "metabase": {"url": dash_url}}
+
+
+@app.get("/health")
+def health_check():
+    """Sprawdza dostępność Ollamy, Metabase i PostgreSQL."""
+    status = {}
+
+    try:
+        r = http.get(f"{OLLAMA_URL}/api/tags", timeout=5)
+        models_list = [m["name"] for m in r.json().get("models", [])]
+        status["ollama"] = {"ok": True, "models": models_list}
+    except Exception as e:
+        status["ollama"] = {"ok": False, "error": str(e)}
+
+    try:
+        r = http.get(f"{METABASE_URL}/api/health", timeout=5)
+        status["metabase"] = {"ok": r.status_code == 200}
+    except Exception as e:
+        status["metabase"] = {"ok": False, "error": str(e)}
+
+    try:
+        conn = _pg_conn()
+        conn.close()
+        status["postgres"] = {"ok": True}
+    except Exception as e:
+        status["postgres"] = {"ok": False, "error": str(e)}
+
+    all_ok = all(v["ok"] for v in status.values())
+    return {"status": "ok" if all_ok else "degraded", "services": status}
 
 
 @app.post("/users")
@@ -642,7 +840,7 @@ def register(user: UserIn, db: Session = Depends(database.get_db)):
     h = bcrypt.hashpw(user.password_hash.encode(), bcrypt.gensalt()).decode()
     u = models.User(email=user.email, password_hash=h)
     db.add(u); db.commit(); db.refresh(u)
-    return {"id": u.id, "email": u.email}
+    return {"id": u.id, "email": u.email, "token": _create_token(u.id, u.email)}
 
 
 @app.post("/login")
@@ -659,7 +857,7 @@ def login(user: UserIn, db: Session = Depends(database.get_db)):
         ok = True
     if not ok:
         raise HTTPException(status_code=401, detail="Nieprawidlowy e-mail lub haslo")
-    return {"id": u.id, "email": u.email}
+    return {"id": u.id, "email": u.email, "token": _create_token(u.id, u.email)}
 
 
 class DescribeIn(BaseModel):
@@ -669,21 +867,45 @@ class DescribeIn(BaseModel):
 class EnhanceIn(BaseModel):
     prompt: str
     schema_text: str
+    description: str = ""
+    clarify_question: str = ""
+    clarify_answer: str = ""
+
+
+class ClarifyIn(BaseModel):
+    goal: str
+    schema_text: str
+    description: str = ""
+
+
+class PromptsIn(BaseModel):
+    prompts: dict[str, str]
+
+
+def _has_cjk(text: str) -> bool:
+    """Zwraca True jeśli tekst zawiera znaki chińskie/japońskie/koreańskie lub cyrylicę.
+
+    Model potrafi wtrącić pojedyncze obce znaki w polski tekst (np. 'Wключaj') —
+    traktujemy cyrylicę tak samo jak CJK."""
+    return bool(re.search(r'[一-鿿぀-ゟ゠-ヿ가-힯а-яА-ЯёЁ]', text))
 
 
 @app.post("/enhance-prompt")
-def enhance_prompt(body: EnhanceIn):
-    enhance_prompt_text = (
-        "Jestes ekspertem analityki danych. Przepisz zapytanie uzytkownika na bardziej szczegolowe.\n"
-        "ZASADY — przestrzegaj wszystkich:\n"
-        "- Odpowiedz WYLACZNIE po polsku, naturalnym jezykiem (1-3 zdania).\n"
-        "- ABSOLUTNIE NIE pisz SQL, kodu, SELECT, FROM, WHERE, JOIN ani zadnych fragmentow kodu.\n"
-        "- NIE uzywaj nazw kolumn w formacie technicznych (bez customer.firstname — pisz 'imie i nazwisko klienta').\n"
-        "- Dodaj: co konkretnie pokazac, jak sortowac, ile rekordow (np. TOP 10), jaka agregacja (suma/srednia/liczba).\n"
-        "- Uzyj wiedzy ze schematu zeby wiedziec co jest dostepne, ale pisz o tym po polsku.\n"
-        "Przyklad dobrego wyniku: 'Pokaż TOP 10 klientów według łącznej kwoty zakupów, posortowanych malejąco. Uwzględnij imię, nazwisko i sumę wydatków.'\n"
-        f"SCHEMAT:\n{body.schema_text}\n"
-        f"ZAPYTANIE UZYTKOWNIKA: {body.prompt}"
+def enhance_prompt(body: EnhanceIn, _: int = Depends(verify_token)):
+    # Opcjonalne doprecyzowanie z kroku clarify — pytanie modelu + odpowiedź użytkownika.
+    # Trafia do szablonu tylko gdy oba pola są wypełnione (samo pytanie bez odpowiedzi nic nie wnosi).
+    clarification = ""
+    if body.clarify_question.strip() and body.clarify_answer.strip():
+        clarification = (
+            f"DOPRECYZOWANIE OD UZYTKOWNIKA (MUSISZ uwzglednic w przepisanym zapytaniu): "
+            f"na pytanie '{body.clarify_question.strip()}' uzytkownik odpowiedzial: "
+            f"'{body.clarify_answer.strip()}'"
+        )
+    enhance_prompt_text = PROMPTS["enhance_prompt"].format(
+        schema_text=body.schema_text,
+        description=body.description,
+        prompt=body.prompt,
+        clarification=clarification,
     )
     try:
         r = http.post(f"{OLLAMA_URL}/api/generate",
@@ -691,37 +913,112 @@ def enhance_prompt(body: EnhanceIn):
                       timeout=90)
         r.raise_for_status()
         enhanced = (r.json().get("response") or "").strip()
-        # Jeśli model mimo wszystko wygenerował SQL — bierzemy tylko pierwsze zdanie przed SELECT/FROM
+
+        # Jeśli model wygenerował obce znaki (CJK/cyrylica) — odrzuć i zwróć oryginał
+        # (z doklejoną odpowiedzią z doprecyzowania, żeby intencja użytkownika nie przepadła)
+        if _has_cjk(enhanced):
+            fallback = body.prompt
+            if body.clarify_answer.strip():
+                fallback = f"{fallback.strip()} {body.clarify_answer.strip()}"
+            return {"enhanced": fallback}
+
+        # Jeśli model mimo wszystko wygenerował SQL — bierzemy tylko linie bez słów kluczowych SQL
         if any(kw in enhanced.upper() for kw in ("SELECT ", "FROM ", "JOIN ", "WHERE ", "GROUP BY")):
             lines = [l for l in enhanced.splitlines() if not any(
                 kw in l.upper() for kw in ("SELECT", "FROM", "JOIN", "WHERE", "GROUP BY", "ORDER BY", "LIMIT", "HAVING"))]
             enhanced = " ".join(lines).strip() or body.prompt
-        return {"enhanced": enhanced}
+
+        # Jeśli user nie podał żadnej liczby, a model mimo instrukcji dopisał "TOP 20" itp. —
+        # model ma silny wyuczony nawyk wymyslania liczby przy słowie "top", niezależny od promptu.
+        if not re.search(r'\d', body.prompt) and re.search(r'(?i)\btop\s+\d+\b', enhanced):
+            enhanced = re.sub(r'(?i)\btop\s+\d+\b', 'TOP', enhanced)
+
+        # Model czasem ignoruje doprecyzowanie mimo instrukcji w prompcie (silny prior 7B).
+        # Porównujemy po rdzeniach słów (pierwsze 5 znaków — radzi sobie z polską odmianą,
+        # np. 'miesięcznym' vs 'miesięczny'); jeśli nic z odpowiedzi użytkownika nie trafiło
+        # do wyniku — doklejamy ją, żeby intencja nie zginęła.
+        answer = body.clarify_answer.strip()
+        if enhanced and answer:
+            stems = [w[:5] for w in re.findall(r'\w{4,}', answer.lower())]
+            if stems and not any(s in enhanced.lower() for s in stems):
+                enhanced = f"{enhanced.rstrip('.')}. Uwzględnij: {answer}."
+
+        return {"enhanced": enhanced or body.prompt}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/describe-schema")
-def describe_schema(body: DescribeIn):
-    prompt = (
-        "Jestes ekspertem od baz danych. Na podstawie schematu ponizej napisz krotki opis po polsku (3-4 zdania).\n"
-        "Opisz: co zawiera baza, jakie sa glowne tabele i do czego sluza, jakie analizy mozna z niej robic.\n"
-        "Odpowiedz WYLACZNIE opisem tekstowym — bez JSON, bez punktow, bez markdown.\n"
-        f"SCHEMAT:\n{body.schema_text}"
-    )
+def describe_schema(body: DescribeIn, _: int = Depends(verify_token)):
+    prompt = PROMPTS["describe_schema"].format(schema_text=body.schema_text)
     try:
         r = http.post(f"{OLLAMA_URL}/api/generate",
                       json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
-                      timeout=60)
+                      timeout=180)
         r.raise_for_status()
-        return {"description": (r.json().get("response") or "").strip()}
+        desc = (r.json().get("response") or "").strip()
+        if not desc:
+            raise HTTPException(status_code=500, detail="Model zwrócił pustą odpowiedź")
+
+        # Model czasem wtraca pojedyncze chinskie/japonskie/koreanskie znaki w polskim tekscie — usun je.
+        if _has_cjk(desc):
+            desc = re.sub(r'[一-鿿぀-ゟ゠-ヿ가-힯а-яА-ЯёЁ]+', '', desc)
+            desc = re.sub(r'\s+([.,;:])', r'\1', desc)
+            desc = re.sub(r'[ \t]{2,}', ' ', desc).strip()
+
+        return {"description": desc}
+    except HTTPException:
+        raise
     except Exception as e:
+        print(f"[describe-schema ERROR] {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/clarify-prompt")
+def clarify_prompt(body: ClarifyIn, _: int = Depends(verify_token)):
+    """Opcjonalny krok: model zwraca jedno pytanie doprecyzowujace cel, albo None jesli cel jest juz jasny."""
+    prompt = PROMPTS["clarify_prompt"].format(
+        goal=body.goal, schema_text=body.schema_text, description=body.description,
+    )
+    try:
+        out = _ollama_json(prompt, timeout=90)
+    except (OllamaUnavailableError, OllamaResponseError) as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    question = out.get("question") if isinstance(out, dict) else None
+    return {"question": question or None}
+
+
+@app.get("/prompts")
+def get_prompts(_: int = Depends(verify_token)):
+    return PROMPTS
+
+
+@app.put("/prompts")
+def update_prompts(body: PromptsIn, _: int = Depends(verify_token)):
+    global PROMPTS
+    updated = dict(PROMPTS)
+    for key, text in body.prompts.items():
+        if key not in PROMPTS:
+            raise HTTPException(status_code=400, detail=f"Nieznany klucz promptu: '{key}'")
+        required = _PROMPT_PLACEHOLDERS.get(key, set())
+        found = {field for _, field, _, _ in Formatter().parse(text) if field}
+        missing = required - found
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Prompt '{key}': brakuje wymaganych placeholderow {sorted(missing)}",
+            )
+        updated[key] = text
+    with open(_PROMPTS_PATH, "w", encoding="utf-8") as f:
+        json.dump(updated, f, ensure_ascii=False, indent=2)
+    PROMPTS = updated
+    return {"ok": True, "prompts": PROMPTS}
 
 
 @app.post("/upload")
 async def upload_database(user_id: int = Form(...), file: UploadFile = File(...),
-                          db: Session = Depends(database.get_db)):
+                          db: Session = Depends(database.get_db),
+                          token_user_id: int = Depends(verify_token)):
     ext = os.path.splitext(file.filename)[1].lower()
     tmp_path = f"/tmp/_upload_{file.filename}"
 
@@ -765,8 +1062,12 @@ async def upload_database(user_id: int = Form(...), file: UploadFile = File(...)
         safe_tname = re.sub(r"[^\w]", "_", tname).strip("_").lower() or "data"
         df.columns = [re.sub(r"\W+", "_", c).strip("_").lower() for c in df.columns]
         df.to_sql(safe_tname, engine, schema=schema_name, if_exists="replace", index=False)
-    # Rzutuj kolumny tekstowe z datami na TIMESTAMP bezpośrednio w PostgreSQL
-    date_hints = {'date', 'time', 'created', 'updated', 'timestamp'}
+    # Rzutuj kolumny tekstowe z datami na TIMESTAMP bezpośrednio w PostgreSQL.
+    # Kolumna jest kandydatem gdy: nazwa zawiera wskazówkę (EN/PL, np. 'data_zamowienia')
+    # LUB próbka wartości wygląda jak data ISO (np. '2024-01-31'). Nieudane rzutowanie
+    # (wartości nie są datami) jest bezpiecznie wycofywane — kolumna zostaje tekstem.
+    date_hints = {'date', 'time', 'created', 'updated', 'timestamp', 'data', 'czas'}
+    iso_date_re = re.compile(r'^\s*\d{4}-\d{2}-\d{2}')
     from sqlalchemy import text as sa_text2
     with engine.connect() as conn:
         for safe_t in [re.sub(r"[^\w]", "_", t).strip("_").lower() or "data" for t in dfs.keys()]:
@@ -775,7 +1076,17 @@ async def upload_database(user_id: int = Form(...), file: UploadFile = File(...)
                 "WHERE table_schema = :s AND table_name = :t AND data_type = 'text'"),
                 {"s": schema_name, "t": safe_t}).fetchall()
             for (col,) in rows:
-                if any(h in col.lower() for h in date_hints):
+                candidate = any(h in col.lower() for h in date_hints)
+                if not candidate:
+                    try:
+                        sample = conn.execute(sa_text2(
+                            f'SELECT "{col}" FROM "{schema_name}"."{safe_t}" '
+                            f'WHERE "{col}" IS NOT NULL LIMIT 5')).fetchall()
+                        candidate = bool(sample) and all(
+                            iso_date_re.match(str(v[0])) for v in sample)
+                    except Exception:
+                        conn.rollback()
+                if candidate:
                     try:
                         conn.execute(sa_text2(
                             f'ALTER TABLE "{schema_name}"."{safe_t}" '
@@ -795,15 +1106,27 @@ async def upload_database(user_id: int = Form(...), file: UploadFile = File(...)
 
 
 @app.get("/users/{user_id}/databases")
-def get_user_databases(user_id: int, db: Session = Depends(database.get_db)):
+def get_user_databases(user_id: int, db: Session = Depends(database.get_db),
+                       token_user_id: int = Depends(verify_token)):
     rows = db.query(models.Database).filter_by(user_id=user_id).order_by(
         models.Database.uploaded_at.desc()).all()
-    return [{"id": r.id, "name": r.name, "file_path": r.file_path, "schema": r.schema_json}
-            for r in rows]
+    result = []
+    for r in rows:
+        try:
+            full = get_db_schema(r.file_path)
+            rich = {t: [{"name": c["name"], "type": c["type"]} for c in info["columns"]]
+                    for t, info in full.items()}
+        except Exception:
+            plain = r.schema_json or {}
+            rich = {t: [{"name": c, "type": "unknown"} for c in cols]
+                    for t, cols in plain.items()}
+        result.append({"id": r.id, "name": r.name, "file_path": r.file_path, "schema": rich})
+    return result
 
 
 @app.delete("/databases/{db_id}")
-def delete_database(db_id: int, db: Session = Depends(database.get_db)):
+def delete_database(db_id: int, db: Session = Depends(database.get_db),
+                    _: int = Depends(verify_token)):
     rec = db.query(models.Database).filter_by(id=db_id).first()
     if not rec:
         raise HTTPException(status_code=404, detail="Baza nie istnieje")
@@ -826,7 +1149,8 @@ def delete_database(db_id: int, db: Session = Depends(database.get_db)):
 
 
 @app.get("/users/{user_id}/queries")
-def get_user_queries(user_id: int, db: Session = Depends(database.get_db)):
+def get_user_queries(user_id: int, db: Session = Depends(database.get_db),
+                     token_user_id: int = Depends(verify_token)):
     rows = db.query(models.Query).filter_by(user_id=user_id).order_by(
         models.Query.created_at.desc()).limit(20).all()
     return [{"id": r.id, "prompt": r.prompt_nl, "sql": r.generated_sql,
@@ -834,7 +1158,8 @@ def get_user_queries(user_id: int, db: Session = Depends(database.get_db)):
 
 
 @app.post("/generate")
-def generate(g: GenerateIn, db: Session = Depends(database.get_db)):
+def generate(g: GenerateIn, db: Session = Depends(database.get_db),
+             _: int = Depends(verify_token)):
     db_obj = db.query(models.Database).filter_by(file_path=g.db_path).first()
     db_id = db_obj.id if db_obj else 1
 
@@ -843,6 +1168,12 @@ def generate(g: GenerateIn, db: Session = Depends(database.get_db)):
         multi = _generate_multichart(g, db, db_id)
         if multi:
             return multi
+    except OllamaUnavailableError as e:
+        # Ollama zupełnie niedostępna — nie ma sensu próbować n8n (też jej używa)
+        rec = models.Query(user_id=g.user_id, database_id=db_id, prompt_nl=_full_prompt(g),
+                           generated_sql="", status="error", retry_count=0)
+        db.add(rec); db.commit()
+        return {"status": "error", "error": str(e)}
     except Exception:
         pass
 

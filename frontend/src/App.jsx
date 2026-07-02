@@ -1,9 +1,26 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 const API_URL = "http://localhost:8000";
 
+function authHeaders() {
+  const token = localStorage.getItem("token");
+  return token ? { "Authorization": `Bearer ${token}` } : {};
+}
+
+function buildSchemaText(schema) {
+  return Object.entries(schema)
+    .map(([table, cols]) => {
+      const colList = cols.map(c =>
+        typeof c === 'object' ? `${c.name} (${c.type})` : c
+      ).join(", ");
+      return `Tabela ${table}: ${colList}`;
+    })
+    .join("\n");
+}
+
 export default function App() {
-  const [user, setUser]             = useState(null);
+  const saved = (() => { try { return JSON.parse(localStorage.getItem("user")); } catch { return null; } })();
+  const [user, setUser]             = useState(saved);
   const [email, setEmail]           = useState("test@test.pl");
   const [password, setPassword]     = useState("");
   const [authMode, setAuthMode]     = useState("login");
@@ -25,7 +42,17 @@ export default function App() {
   const [isEnhancing, setIsEnhancing]   = useState(false);
   const [showSchema, setShowSchema]     = useState(false);
 
+  const [isClarifying, setIsClarifying]   = useState(false);
+  const [clarifyQuestion, setClarifyQuestion] = useState("");
+  const [clarifyAnswer, setClarifyAnswer]     = useState("");
+
+  useEffect(() => {
+    if (saved) { fetchDatabases(saved.id); fetchHistory(saved.id); }
+  }, []);
+
   const enterApp = (data) => {
+    localStorage.setItem("token", data.token);
+    localStorage.setItem("user", JSON.stringify({ id: data.id, email: data.email }));
     setUser(data);
     fetchDatabases(data.id);
     fetchHistory(data.id);
@@ -66,15 +93,13 @@ export default function App() {
 
   const generateDescription = async (dbObj) => {
     if (!dbObj) return;
-    const schemaText = Object.entries(dbObj.schema)
-      .map(([table, cols]) => `Tabela ${table}: ${cols.join(", ")}`)
-      .join("\n");
+    const schemaText = buildSchemaText(dbObj.schema);
     setIsGeneratingDesc(true);
     setDescription("");
     try {
       const res  = await fetch(`${API_URL}/describe-schema`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({ schema_text: schemaText }),
       });
       const data = await res.json();
@@ -83,19 +108,74 @@ export default function App() {
     setIsGeneratingDesc(false);
   };
 
-  const enhancePrompt = async () => {
+  // Krok 1 ulepszania: sprawdź, czy cel wymaga doprecyzowania.
+  // Jeśli model ma pytanie — pokaż je i czekaj na odpowiedź (lub "Pomiń").
+  // Jeśli nie — od razu przejdź do ulepszania.
+  const startEnhance = async () => {
     const selectedDb = databases.find(d => d.id == selectedDbId);
     if (!selectedDb) return alert("Wybierz bazę danych.");
     if (!goal.trim()) return alert("Wpisz cel analityczny do ulepszenia.");
-    const schemaText = Object.entries(selectedDb.schema)
-      .map(([table, cols]) => `Tabela ${table}: ${cols.join(", ")}`)
-      .join("\n");
+    const schemaText = buildSchemaText(selectedDb.schema);
+
+    setIsClarifying(true);
+    setClarifyQuestion("");
+    setClarifyAnswer("");
+    let question = "";
+    try {
+      const res = await fetch(`${API_URL}/clarify-prompt`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ goal, schema_text: schemaText, description }),
+      });
+      const data = await res.json();
+      if (res.ok && data.question) question = data.question;
+    } catch { /* clarify niedostępny — ulepszaj bez doprecyzowania */ }
+    setIsClarifying(false);
+
+    if (question) { setClarifyQuestion(question); return; }
+    await runEnhance("", "");
+  };
+
+  // Krok 2: właściwe ulepszanie — opis bazy + przepisanie promptu,
+  // z opcjonalną parą pytanie/odpowiedź z kroku doprecyzowania.
+  const runEnhance = async (question, answer) => {
+    const selectedDb = databases.find(d => d.id == selectedDbId);
+    if (!selectedDb) return;
+    const schemaText = buildSchemaText(selectedDb.schema);
+    setClarifyQuestion("");
+    setClarifyAnswer("");
+
     setIsEnhancing(true);
     try {
+      // Krok 1: wygeneruj świeży opis bazy — pojawia się w polu tekstowym
+      setIsGeneratingDesc(true);
+      setDescription("");
+      let freshDescription = "";
+      try {
+        const descRes = await fetch(`${API_URL}/describe-schema`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeaders() },
+          body: JSON.stringify({ schema_text: schemaText }),
+        });
+        const descData = await descRes.json();
+        if (!descRes.ok) {
+          setDescription("⚠ Nie udało się wygenerować opisu (model zbyt wolny). Kliknij 'Generuj opis AI' ręcznie lub poczekaj.");
+        } else {
+          freshDescription = descData.description || "";
+          setDescription(freshDescription);
+        }
+      } finally {
+        setIsGeneratingDesc(false);
+      }
+
+      // Ulepsz prompt używając opisu + schematu + (opcjonalnie) doprecyzowania
       const res = await fetch(`${API_URL}/enhance-prompt`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: goal, schema_text: schemaText }),
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({
+          prompt: goal, schema_text: schemaText, description: freshDescription,
+          clarify_question: question, clarify_answer: answer,
+        }),
       });
       const data = await res.json();
       if (data.enhanced) setGoal(data.enhanced);
@@ -109,23 +189,30 @@ export default function App() {
     return `Dokładnie ${selectedTypes.length} wykresy: ${names}`;
   };
 
+  const logout = () => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+    setUser(null); setPassword(""); setResult(null);
+    setDatabases([]); setHistory([]);
+  };
+
   const fetchDatabases = async (userId) => {
     try {
-      const res  = await fetch(`${API_URL}/users/${userId}/databases`);
+      const res = await fetch(`${API_URL}/users/${userId}/databases`, { headers: authHeaders() });
+      if (res.status === 401) { logout(); return; }
       const data = await res.json();
+      if (!Array.isArray(data)) return;
       setDatabases(data);
-      if (data.length > 0) {
-        setSelectedDbId(data[0].id);
-        generateDescription(data[0]);
-      }
+      if (data.length > 0) setSelectedDbId(data[0].id);
     } catch (e) { console.error(e); }
   };
 
   const fetchHistory = async (userId) => {
     try {
-      const res  = await fetch(`${API_URL}/users/${userId}/queries`);
+      const res = await fetch(`${API_URL}/users/${userId}/queries`, { headers: authHeaders() });
+      if (res.status === 401) { logout(); return; }
       const data = await res.json();
-      setHistory(data);
+      if (Array.isArray(data)) setHistory(data);
     } catch (e) { console.error(e); }
   };
 
@@ -133,7 +220,7 @@ export default function App() {
   const handleDeleteDb = async (dbId, dbName) => {
     if (!confirm(`Usunąć bazę "${dbName}"? Tej operacji nie można cofnąć.`)) return;
     try {
-      await fetch(`${API_URL}/databases/${dbId}`, { method: "DELETE" });
+      await fetch(`${API_URL}/databases/${dbId}`, { method: "DELETE", headers: authHeaders() });
       fetchDatabases(user.id);
       if (selectedDbId == dbId) setSelectedDbId("");
     } catch { alert("Błąd podczas usuwania."); }
@@ -147,7 +234,7 @@ export default function App() {
     fd.append("user_id", user.id);
     fd.append("file", uploadFile);
     try {
-      const res = await fetch(`${API_URL}/upload`, { method: "POST", body: fd });
+      const res = await fetch(`${API_URL}/upload`, { method: "POST", body: fd, headers: authHeaders() });
       if (res.ok) { alert("Baza wgrana pomyślnie."); setUploadFile(null); fetchDatabases(user.id); }
       else alert("Błąd podczas wgrywania.");
     } catch { alert("Błąd komunikacji z serwerem."); }
@@ -157,9 +244,7 @@ export default function App() {
   const handleGenerate = async () => {
     const selectedDb = databases.find(db => db.id == selectedDbId);
     if (!selectedDb) return alert("Wybierz bazę danych.");
-    const schemaText = Object.entries(selectedDb.schema)
-      .map(([table, cols]) => `Tabela ${table}: ${cols.join(", ")}`)
-      .join("\n");
+    const schemaText = buildSchemaText(selectedDb.schema);
 
     setLoading(true);
     setResult(null);
@@ -168,7 +253,7 @@ export default function App() {
     try {
       const res = await fetch(`${API_URL}/generate`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
           user_id: user.id,
           prompt: goal,
@@ -262,7 +347,7 @@ export default function App() {
           ))}
         </nav>
         <div className="p-3 border-t border-slate-800">
-          <button onClick={() => { setUser(null); setPassword(""); setResult(null); }}
+          <button onClick={logout}
             className="w-full text-xs text-slate-400 hover:text-white transition py-1.5 rounded-lg hover:bg-slate-800">
             Wyloguj się
           </button>
@@ -291,8 +376,7 @@ export default function App() {
                       <select value={selectedDbId} onChange={e => {
                           setSelectedDbId(e.target.value);
                           setShowSchema(false);
-                          const db = databases.find(d => d.id == e.target.value);
-                          generateDescription(db);
+                          setDescription("");
                         }}
                         className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500">
                         {databases.length === 0
@@ -315,7 +399,7 @@ export default function App() {
                                   <div key={table} className="mb-2 last:mb-0">
                                     <p className="text-xs font-bold text-blue-800 font-mono">{table}</p>
                                     <p className="text-xs text-blue-600 font-mono leading-relaxed pl-2">
-                                      {cols.join(", ")}
+                                      {cols.map(c => typeof c === 'object' ? `${c.name} (${c.type})` : c).join(", ")}
                                     </p>
                                   </div>
                                 ))}
@@ -333,16 +417,16 @@ export default function App() {
                         value={goal} onChange={e => setGoal(e.target.value)}
                         className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
                       <div className="mt-1.5 flex items-center gap-2">
-                        <button type="button" onClick={enhancePrompt}
-                          disabled={isEnhancing || !goal.trim()}
+                        <button type="button" onClick={startEnhance}
+                          disabled={isEnhancing || isClarifying || !goal.trim()}
                           className="text-xs bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white font-semibold px-3 py-1.5 rounded-lg transition flex items-center gap-1.5">
-                          {isEnhancing ? (
+                          {(isEnhancing || isClarifying) ? (
                             <>
                               <svg className="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24">
                                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
                               </svg>
-                              AI ulepsza...
+                              {isClarifying ? "Sprawdzam cel..." : "AI ulepsza..."}
                             </>
                           ) : "✦ Ulepsz prompt AI"}
                         </button>
@@ -350,6 +434,25 @@ export default function App() {
                           <span className="text-xs text-gray-400">AI przepisuje zapytanie...</span>
                         )}
                       </div>
+                      {clarifyQuestion && (
+                        <div className="mt-2 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                          <p className="text-xs font-semibold text-amber-800 mb-1.5">{clarifyQuestion}</p>
+                          <div className="flex gap-2">
+                            <input type="text" value={clarifyAnswer} onChange={e => setClarifyAnswer(e.target.value)}
+                              placeholder="Twoja odpowiedź..."
+                              className="flex-1 border border-amber-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-amber-400" />
+                            <button type="button" onClick={() => runEnhance(clarifyQuestion, clarifyAnswer)}
+                              disabled={!clarifyAnswer.trim()}
+                              className="text-xs bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white font-semibold px-3 py-1 rounded-lg transition">
+                              ✦ Ulepsz z odpowiedzią
+                            </button>
+                            <button type="button" onClick={() => runEnhance("", "")}
+                              className="text-xs bg-gray-200 hover:bg-gray-300 text-gray-600 font-semibold px-3 py-1 rounded-lg transition">
+                              Pomiń
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                     <div>
                       <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1">
@@ -425,7 +528,7 @@ export default function App() {
                       )}
                     </div>
                     <textarea rows="9"
-                      placeholder={isGeneratingDesc ? "AI analizuje schemat bazy..." : "Wybierz bazę, a AI automatycznie wygeneruje opis. Możesz go edytować."}
+                      placeholder={isGeneratingDesc ? "AI analizuje schemat bazy..." : "Kliknij 'Generuj opis AI' aby wygenerować opis. Możesz go edytować ręcznie."}
                       value={description}
                       onChange={e => setDescription(e.target.value)}
                       disabled={isGeneratingDesc}
@@ -605,6 +708,7 @@ export default function App() {
             </div>
           </div>
         )}
+
       </main>
     </div>
   );

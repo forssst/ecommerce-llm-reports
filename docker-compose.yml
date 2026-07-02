@@ -24,10 +24,9 @@ services:
       - "5678:5678"
     environment:
       - N8N_RUNNERS_ENABLED=true
-      - N8N_RUNNERS_MODE=external
-      - N8N_RUNNERS_BROKER_LISTEN_ADDRESS=0.0.0.0
-      - N8N_RUNNERS_AUTH_TOKEN=2026k
-      - N8N_NATIVE_PYTHON_RUNNER=true
+      # internal: n8n sam odpala runner JS we wlasnym procesie (bez osobnego
+      # kontenera/brokera). external timeoutowal node'y Code po 60s -> workflow padal.
+      - N8N_RUNNERS_MODE=internal
       - N8N_BLOCK_FS_WRITE_ACCESS=false
       - N8N_AI_ENABLED=true
       - N8N_ENCRYPTION_KEY=2026n8n
@@ -89,6 +88,15 @@ services:
       - n8n
 
     
+  frontend:
+    build: ./frontend
+    container_name: frontend
+    restart: always
+    ports:
+      - "5173:80"
+    depends_on:
+      - fastapi_backend
+
   postgres:
     image: postgres:16-alpine
     container_name: postgres_analytics
@@ -120,6 +128,8 @@ services:
       - PG_DB=analytics
       - PG_USER=analyst
       - PG_PASS=analyst
+      - OLLAMA_MODEL=qwen2.5-coder:7b
+      - OLLAMA_SQL_MODEL=qwen2.5-coder:7b
     depends_on:
       - n8n
       - postgres

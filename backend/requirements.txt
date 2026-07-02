@@ -6,5 +6,7 @@ requests
 python-multipart
 pandas
 openpyxl
+xlrd
 psycopg2-binary
 bcrypt
+python-jose[cryptography]
