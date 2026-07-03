@@ -43,3 +43,8 @@ n8n-task-runners.json
 
 # zrzuty ekranu z testów manualnych (dane prywatne)
 screenyztestów/
+
+# środowisko testowe
+.pytest_cache/
+tests/.pytest_cache/
+__pycache__/
