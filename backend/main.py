@@ -7,7 +7,7 @@ import shutil
 import json
 from string import Formatter
 from typing import Optional
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, date, timezone, timedelta
 
 import psycopg2
 from psycopg2 import sql as pgsql
@@ -128,6 +128,13 @@ class GenerateIn(BaseModel):
 
 
 _RELATIVE_DATE_FILTER = re.compile(r'(?i)(current_date|now\(\))\s*[-+]\s*interval')
+
+# Fraza "w ostatnich 3 miesiącach" / "w ostatnim roku" itp. w TYTULE wykresu.
+# Guard _RELATIVE_DATE_FILTER usuwa taki filtr z SQL przy retry, ale tytul z planu
+# zostaje — wtedy tytul obiecuje okres, ktorego SQL nie filtruje.
+_RELATIVE_PERIOD_IN_TITLE = re.compile(
+    r'(?i)\s*(?:w\s+ci[ąa]gu\s+|w\s+|z\s+|za\s+)?ostatni\w*\s*(?:\d+\s*)?'
+    r'(?:miesi[ąa]c\w*|miesi[ęe]cy|dni\w*|tygodni\w*|lat(?:ach)?|rok\w*)')
 
 # Znaki spoza polskiego alfabetu: CJK, cyrylica oraz łacińskie diakrytyki innych języków
 # (np. węgierskie á/ő/ű, niemieckie ä/ß, czeskie š/č). Polskie ąćęłńóśźż są dozwolone.
@@ -380,6 +387,24 @@ def _check_label_column(cols, sample, chart_type=None):
     return None
 
 
+def _check_smartscalar_shape(cols, sample):
+    """Licznik (smartscalar) w Metabase to wykres TRENDU: wymaga pierwszej kolumny z datą
+    (inaczej karta pokazuje 'Group only by a time field...'). Sprawdzamy próbkę wyników."""
+    if not cols or not sample:
+        return None
+    first = next((row[0] for row in sample if row and row[0] is not None), None)
+    if first is None:
+        return None
+    if isinstance(first, (date, datetime)) or re.match(r"^\d{4}-\d{2}", str(first)):
+        return None
+    return (
+        "LICZNIK (smartscalar) wymaga trendu w czasie: pierwsza kolumna MUSI byc miesiacem "
+        "(DATE_TRUNC('month', kolumna_daty)), druga JEDNYM agregatem numerycznym. "
+        "Przyklad: SELECT DATE_TRUNC('month', data_zamowienia) AS miesiac, COUNT(*) AS liczba "
+        "FROM zamowienia GROUP BY 1 ORDER BY 1"
+    )
+
+
 def _hint_missing_column(schema_name: str, error_msg: str) -> str:
     """Jeśli błąd to 'column X does not exist', dołącza listę dostępnych kolumn z PostgreSQL."""
     m = re.search(r'column ["\w.]*?(\w+)["\w.]*? does not exist', error_msg, re.IGNORECASE)
@@ -419,6 +444,10 @@ def _run_and_validate(schema_name, sql, chart_type=None):
         label_err = _check_label_column(cols, sample, chart_type)
         if label_err:
             return False, label_err, cols, sample
+        if chart_type == "smartscalar":
+            ss_err = _check_smartscalar_shape(cols, sample)
+            if ss_err:
+                return False, ss_err, cols, sample
         return True, None, cols, sample
     except Exception as e:
         enriched = _hint_missing_column(schema_name, str(e))
@@ -664,7 +693,7 @@ def _generate_multichart(g, db, db_id):
 
     _CHART_HINTS = {
         "scatter":     "- WYKRES PUNKTOWY: zwroc DOKLADNIE 2 kolumny NUMERYCZNE (np. avg_minutes, avg_price). BEZ kolumn tekstowych. Uzyj GROUP BY i AVG/SUM zeby zredukowac wiersze do sensownego zbioru punktow.\n",
-        "smartscalar": "- LICZNIK (scalar): zwroc DOKLADNIE JEDEN rzad z JEDNYM agregatem numerycznym. Przyklad: SELECT ROUND(SUM(total)::numeric,2) AS total_revenue FROM invoice\n",
+        "smartscalar": "- LICZNIK (smartscalar): to wykres TRENDU — zwroc DOKLADNIE 2 kolumny: miesiac (DATE_TRUNC('month', kolumna_daty)) i JEDEN agregat numeryczny, posortowane po miesiacu. Przyklad: SELECT DATE_TRUNC('month', invoicedate) AS miesiac, ROUND(SUM(total)::numeric,2) AS przychod FROM invoice GROUP BY 1 ORDER BY 1\n",
         "funnel":      "- LEJKOWY (funnel): zwroc 2 kolumny — etykieta TEXT (np. nazwa etapu/kategorii) i wartosc numeryczna — posortowane MALEJACO.\n",
         "waterfall":   "- KASKADOWY (waterfall): MUSISZ policzyc ROZNICE rok-do-roku uzywajac LAG(). Przyklad wzorca: WITH y AS (SELECT EXTRACT(YEAR FROM invoicedate)::int AS rok, SUM(total) AS rev FROM invoice GROUP BY 1) SELECT rok::text AS rok, ROUND((rev - LAG(rev) OVER (ORDER BY rok))::numeric, 2) AS zmiana FROM y WHERE LAG(rev) OVER (ORDER BY rok) IS NOT NULL ORDER BY rok. Zwroc 2 kolumny: kategoria (TEXT) i zmiana (NUMERIC, moze byc ujemna).\n",
         "combo":       "- KOMBINOWANY (combo): zwroc kolumne daty/kategorii jako pierwsza, potem co najmniej 2 kolumny numeryczne (np. miesieczna sprzedaz i skumulowana). Sortuj ASC po dacie.\n",
@@ -714,6 +743,10 @@ def _generate_multichart(g, db, db_id):
         if not ok or not sql:
             print(f"[SKIP] chart='{title}' po {3} probach — pomijam")
             continue
+        # Tytul obiecuje "ostatnie X miesiecy", a zaakceptowany SQL nie ma zadnego WHERE
+        # (np. retry po _RELATIVE_DATE_FILTER usunal filtr) -> usun fraze z tytulu.
+        if "where" not in sql.lower() and _RELATIVE_PERIOD_IN_TITLE.search(title):
+            title = _RELATIVE_PERIOD_IN_TITLE.sub("", title).strip(" ,–-") or (g.prompt or goal)[:60].strip()
         display = ctype if ctype in _VALID_DISPLAYS else _infer_display(cols, sample)
         charts.append((title, sql, display, cols))
 

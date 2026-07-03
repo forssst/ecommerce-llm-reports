@@ -40,3 +40,6 @@ pliki_testowe/*.csv
 *.pdf
 file.json
 n8n-task-runners.json
+
+# zrzuty ekranu z testów manualnych (dane prywatne)
+screenyztestów/

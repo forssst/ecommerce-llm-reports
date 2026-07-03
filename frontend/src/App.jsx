@@ -41,6 +41,7 @@ export default function App() {
   const [showSql, setShowSql]           = useState(false);
   const [isEnhancing, setIsEnhancing]   = useState(false);
   const [showSchema, setShowSchema]     = useState(false);
+  const [showDesc, setShowDesc]         = useState(false);
 
   const [isClarifying, setIsClarifying]   = useState(false);
   const [clarifyQuestion, setClarifyQuestion] = useState("");
@@ -501,12 +502,14 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Prawa kolumna — opis AI */}
+                  {/* Prawa kolumna — opis AI (zwijany, domyślnie schowany) */}
                   <div>
                     <div className="flex items-center justify-between mb-1">
-                      <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide">
-                        Opis bazy danych
-                      </label>
+                      <button type="button" onClick={() => setShowDesc(v => !v)}
+                        className="text-xs font-semibold text-gray-600 uppercase tracking-wide hover:text-blue-600 transition">
+                        {showDesc ? "▲" : "▼"} Opis bazy danych
+                        {!showDesc && description && <span className="text-green-600 normal-case font-normal"> (wypełniony)</span>}
+                      </button>
                       {isGeneratingDesc ? (
                         <span className="text-xs text-blue-500 flex items-center gap-1">
                           <svg className="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24">
@@ -519,7 +522,7 @@ export default function App() {
                         <button type="button"
                           onClick={() => {
                             const db = databases.find(d => d.id == selectedDbId);
-                            if (db) generateDescription(db);
+                            if (db) { setShowDesc(true); generateDescription(db); }
                           }}
                           disabled={!selectedDbId || databases.length === 0}
                           className="text-xs text-blue-600 hover:underline disabled:opacity-40 font-medium">
@@ -527,13 +530,15 @@ export default function App() {
                         </button>
                       )}
                     </div>
-                    <textarea rows="9"
-                      placeholder={isGeneratingDesc ? "AI analizuje schemat bazy..." : "Kliknij 'Generuj opis AI' aby wygenerować opis. Możesz go edytować ręcznie."}
-                      value={description}
-                      onChange={e => setDescription(e.target.value)}
-                      disabled={isGeneratingDesc}
-                      className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none h-full
-                        ${isGeneratingDesc ? "bg-gray-50 text-gray-400 border-gray-200" : "border-gray-200 bg-white"}`} />
+                    {showDesc && (
+                      <textarea rows="9"
+                        placeholder={isGeneratingDesc ? "AI analizuje schemat bazy..." : "Kliknij 'Generuj opis AI' aby wygenerować opis. Możesz go edytować ręcznie."}
+                        value={description}
+                        onChange={e => setDescription(e.target.value)}
+                        disabled={isGeneratingDesc}
+                        className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none h-full
+                          ${isGeneratingDesc ? "bg-gray-50 text-gray-400 border-gray-200" : "border-gray-200 bg-white"}`} />
+                    )}
                   </div>
                 </div>
 
