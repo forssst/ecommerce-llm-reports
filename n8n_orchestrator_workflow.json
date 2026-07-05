@@ -184,7 +184,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const dashId = $input.item.json.id;\nconst token = $('Scal DB ID').item.json.token;\nconst dbId = $('Scal DB ID').item.json.db_id;\nconst charts = $('Scal DB ID').item.json.charts;\nconst dateColumn = $('Generuj SQL i Zbierz Wykresy').first().json.date_column || null;\n\nreturn charts.map(chart => {\n  let sql = chart.sql;\n  let hasDateFilter = false;\n\n  if (dateColumn && sql.toLowerCase().includes(dateColumn.toLowerCase())) {\n    const hasWhere = /\\bWHERE\\b/i.test(sql);\n    const snippet = `[[AND ${dateColumn} >= {{start_date}}]] [[AND ${dateColumn} <= {{end_date}}]]`;\n\n    if (hasWhere) {\n      if (/\\b(GROUP\\s+BY|ORDER\\s+BY|LIMIT|HAVING)\\b/i.test(sql)) {\n        sql = sql.replace(/\\b(GROUP\\s+BY|ORDER\\s+BY|LIMIT|HAVING)\\b/i, snippet + ' $1');\n      } else {\n        sql = sql + ' ' + snippet;\n      }\n    } else {\n      const whereSnippet = `WHERE 1=1 ${snippet}`;\n      if (/\\b(GROUP\\s+BY|ORDER\\s+BY|LIMIT|HAVING)\\b/i.test(sql)) {\n        sql = sql.replace(/\\b(GROUP\\s+BY|ORDER\\s+BY|LIMIT|HAVING)\\b/i, whereSnippet + ' $1');\n      } else {\n        sql = sql + ' ' + whereSnippet;\n      }\n    }\n    hasDateFilter = true;\n  }\n\n  return {\n    json: {\n      dash_id: dashId,\n      token,\n      db_id: dbId,\n      title: chart.title,\n      sql,\n      display: chart.display,\n      columns: chart.columns || [],\n      has_date_filter: hasDateFilter\n    }\n  };\n});"
+        "jsCode": "const dashId = $input.item.json.id;\nconst token = $('Scal DB ID').item.json.token;\nconst dbId = $('Scal DB ID').item.json.db_id;\nconst charts = $('Scal DB ID').item.json.charts;\nconst dateColumns = $('Generuj SQL i Zbierz Wykresy').first().json.date_columns || [];\n\nreturn charts.map(chart => {\n  let sql = chart.sql;\n  let hasDateFilter = false;\n  const sqlLower = sql.toLowerCase();\n  const dateColumn = dateColumns.find(c => sqlLower.includes(c.toLowerCase())) || null;\n\n  if (dateColumn) {\n    const hasWhere = /\\bWHERE\\b/i.test(sql);\n    const snippet = `[[AND ${dateColumn} >= {{start_date}}]] [[AND ${dateColumn} <= {{end_date}}]]`;\n\n    if (hasWhere) {\n      if (/\\b(GROUP\\s+BY|ORDER\\s+BY|LIMIT|HAVING)\\b/i.test(sql)) {\n        sql = sql.replace(/\\b(GROUP\\s+BY|ORDER\\s+BY|LIMIT|HAVING)\\b/i, snippet + ' $1');\n      } else {\n        sql = sql + ' ' + snippet;\n      }\n    } else {\n      const whereSnippet = `WHERE 1=1 ${snippet}`;\n      if (/\\b(GROUP\\s+BY|ORDER\\s+BY|LIMIT|HAVING)\\b/i.test(sql)) {\n        sql = sql.replace(/\\b(GROUP\\s+BY|ORDER\\s+BY|LIMIT|HAVING)\\b/i, whereSnippet + ' $1');\n      } else {\n        sql = sql + ' ' + whereSnippet;\n      }\n    }\n    hasDateFilter = true;\n  }\n\n  return {\n    json: {\n      dash_id: dashId,\n      token,\n      db_id: dbId,\n      title: chart.title,\n      sql,\n      display: chart.display,\n      columns: chart.columns || [],\n      has_date_filter: hasDateFilter\n    }\n  };\n});"
       },
       "id": "31e2aa06-2706-446a-a39f-e79ea5903b9a",
       "name": "Przygotuj Wykresy",
@@ -210,7 +210,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\n  name: $json.title,\n  dataset_query: {\n    database: $json.db_id,\n    type: 'native',\n    native: {\n      query: $json.sql,\n      'template-tags': $json.has_date_filter ? {\n        'start_date': {id: 'tag-start', name: 'start_date', 'display_name': 'Data od', type: 'text', required: false, default: null},\n        'end_date':   {id: 'tag-end',   name: 'end_date',   'display_name': 'Data do', type: 'text', required: false, default: null}\n      } : {}\n    }\n  },\n  display: $json.display,\n  visualization_settings: $json.display === 'pie'\n    ? {'pie.dimension': ($json.columns)[0], 'pie.metric': ($json.columns)[1]}\n    : ($json.display === 'bar' || $json.display === 'line' || $json.display === 'area')\n      ? {'graph.dimensions': [($json.columns)[0]], 'graph.metrics': ($json.columns).slice(1)}\n      : {}\n}) }}",
+        "jsonBody": "={{ JSON.stringify({\n  name: $json.title,\n  dataset_query: {\n    database: $json.db_id,\n    type: 'native',\n    native: {\n      query: $json.sql,\n      'template-tags': $json.has_date_filter ? {\n        'start_date': {id: 'tag-start', name: 'start_date', 'display_name': 'Data od', type: 'date', required: false, default: null},\n        'end_date':   {id: 'tag-end',   name: 'end_date',   'display_name': 'Data do', type: 'date', required: false, default: null}\n      } : {}\n    }\n  },\n  display: $json.display,\n  visualization_settings: $json.display === 'pie'\n    ? {'pie.dimension': ($json.columns)[0], 'pie.metric': ($json.columns)[1]}\n    : ($json.display === 'bar' || $json.display === 'line' || $json.display === 'area')\n      ? {'graph.dimensions': [($json.columns)[0]], 'graph.metrics': ($json.columns).slice(1)}\n      : {}\n}) }}",
         "options": {}
       },
       "id": "cc6a1b67-035b-472f-96ae-5cb792245c69",
@@ -345,23 +345,19 @@
     },
     {
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "language": "javaScript",
-        "jsCode": "const input = $input.first().json; // {specs, db_path, schema_text, user_prompt}\nconst BACKEND = 'http://fastapi_backend:8000';\nconst OLLAMA = 'http://ollama:11434';\nconst MODEL = 'qwen2.5-coder:7b';\n\nasync function callBackend(path, payload) {\n  return await this.helpers.httpRequest({\n    method: 'POST',\n    url: BACKEND + path,\n    body: payload,\n    json: true,\n  });\n}\n\nasync function callOllama(prompt) {\n  const r = await this.helpers.httpRequest({\n    method: 'POST',\n    url: OLLAMA + '/api/generate',\n    body: { model: MODEL, prompt: prompt, stream: false, format: 'json' },\n    json: true,\n    timeout: 180000,\n  });\n  return JSON.parse(r.response || '{}');\n}\n\nconst charts = [];\nfor (const spec of input.specs) {\n  let sql = '', ok = false, err = '', cols = [], sample = [];\n  for (let attempt = 0; attempt < 3; attempt++) {\n    const sqlPromptResp = await callBackend('/internal/sql-prompt', {\n      goal: spec.goal,\n      chart_type: spec.chart_type || '',\n      schema_text: input.schema_text,\n      prev_sql: sql,\n      prev_err: err,\n    });\n    const rawOut = await callOllama(sqlPromptResp.prompt);\n    const rawSql = (rawOut && rawOut.sql) || '';\n    const validated = await callBackend('/internal/process-sql-attempt', {\n      schema_name: input.db_path,\n      chart_type: spec.chart_type || '',\n      raw_sql: rawSql,\n    });\n    sql = validated.sql;\n    ok = validated.ok;\n    err = validated.error || '';\n    cols = validated.columns;\n    sample = validated.sample;\n    if (ok && sql) break;\n  }\n  if (!ok || !sql) continue;\n  const finalized = await callBackend('/internal/finalize-chart', {\n    title: spec.title,\n    sql: sql,\n    chart_type: spec.chart_type || '',\n    columns: cols,\n    sample: sample,\n    user_prompt: input.user_prompt,\n  });\n  charts.push({ title: finalized.title, sql: sql, display: finalized.display, columns: cols });\n}\n\nconst dateColResp = await this.helpers.httpRequest({\n  method: 'GET',\n  url: BACKEND + '/internal/date-column?schema_name=' + encodeURIComponent(input.db_path),\n  json: true,\n});\n\nreturn [{\n  json: {\n    charts: charts,\n    db_path: input.db_path,\n    user_prompt: input.user_prompt,\n    date_column: dateColResp.date_column || null,\n  },\n}];"
+        "jsCode": "const input = $input.first().json; // {specs, db_path, schema_text, user_prompt}\nconst BACKEND = 'http://fastapi_backend:8000';\nconst OLLAMA = 'http://ollama:11434';\nconst MODEL = 'qwen2.5-coder:7b';\n\nasync function callBackend(path, payload) {\n  return await this.helpers.httpRequest({\n    method: 'POST',\n    url: BACKEND + path,\n    body: payload,\n    json: true,\n  });\n}\n\nasync function callOllama(prompt) {\n  const r = await this.helpers.httpRequest({\n    method: 'POST',\n    url: OLLAMA + '/api/generate',\n    body: { model: MODEL, prompt: prompt, stream: false, format: 'json' },\n    json: true,\n    timeout: 180000,\n  });\n  return JSON.parse(r.response || '{}');\n}\n\nconst charts = [];\nfor (const spec of input.specs) {\n  let sql = '', ok = false, err = '', cols = [], sample = [];\n  for (let attempt = 0; attempt < 3; attempt++) {\n    const sqlPromptResp = await callBackend('/internal/sql-prompt', {\n      goal: spec.goal,\n      chart_type: spec.chart_type || '',\n      schema_text: input.schema_text,\n      prev_sql: sql,\n      prev_err: err,\n    });\n    const rawOut = await callOllama(sqlPromptResp.prompt);\n    const rawSql = (rawOut && rawOut.sql) || '';\n    const validated = await callBackend('/internal/process-sql-attempt', {\n      schema_name: input.db_path,\n      chart_type: spec.chart_type || '',\n      raw_sql: rawSql,\n    });\n    sql = validated.sql;\n    ok = validated.ok;\n    err = validated.error || '';\n    cols = validated.columns;\n    sample = validated.sample;\n    if (ok && sql) break;\n  }\n  if (!ok || !sql) continue;\n  const finalized = await callBackend('/internal/finalize-chart', {\n    title: spec.title,\n    sql: sql,\n    chart_type: spec.chart_type || '',\n    columns: cols,\n    sample: sample,\n    user_prompt: input.user_prompt,\n  });\n  charts.push({ title: finalized.title, sql: sql, display: finalized.display, columns: cols });\n}\n\nconst dateColResp = await this.helpers.httpRequest({\n  method: 'GET',\n  url: BACKEND + '/internal/date-column?schema_name=' + encodeURIComponent(input.db_path),\n  json: true,\n});\n\nreturn [{\n  json: {\n    charts: charts,\n    db_path: input.db_path,\n    user_prompt: input.user_prompt,\n    date_columns: dateColResp.date_columns || [],\n  },\n}];"
       },
       "id": "bbbb2222-0000-0000-0000-000000000002",
       "name": "Generuj SQL i Zbierz Wykresy",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        768,
-        120
+        1008,
+        880
       ]
     },
     {
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "language": "javaScript",
         "jsCode": "const body = $('Webhook').item.json.body;\nconst resp = await this.helpers.httpRequest({\n  method: 'POST',\n  url: 'http://fastapi_backend:8000/internal/plan-prompt',\n  body: {\n    goal: body.prompt,\n    chart_type: body.chart_type || '',\n    description: body.description || '',\n    schema_text: body.schema_text || '',\n  },\n  json: true,\n});\nreturn [{ json: {\n  prompt: resp.prompt,\n  n_charts: resp.n_charts,\n  requested_types: resp.requested_types,\n  db_path: body.db_path,\n  schema_text: body.schema_text,\n  user_prompt: body.prompt,\n} }];"
       },
       "id": "cccc3333-0000-0000-0000-000000000003",
@@ -370,7 +366,7 @@
       "typeVersion": 2,
       "position": [
         512,
-        120
+        128
       ]
     },
     {
@@ -383,8 +379,8 @@
       "type": "@n8n/n8n-nodes-langchain.lmOllama",
       "typeVersion": 1,
       "position": [
-        512,
-        320
+        1264,
+        528
       ],
       "credentials": {
         "ollamaApi": {
@@ -396,22 +392,19 @@
     {
       "parameters": {
         "promptType": "define",
-        "text": "={{ $json.prompt }}",
-        "hasOutputParser": false
+        "text": "={{ $json.prompt }}"
       },
       "id": "eeee5555-0000-0000-0000-000000000005",
       "name": "LLM Chain: Plan",
       "type": "@n8n/n8n-nodes-langchain.chainLlm",
       "typeVersion": 1.6,
       "position": [
-        768,
-        120
+        976,
+        432
       ]
     },
     {
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "language": "javaScript",
         "jsCode": "const chainText = $json.text || '';\nconst cleaned = chainText.replace(/```json/gi, '').replace(/```/g, '').trim();\nlet rawPlan;\ntry {\n  rawPlan = JSON.parse(cleaned);\n} catch (e) {\n  rawPlan = { charts: [] };\n}\n\nconst upstream = $('Zbuduj Prompt Planu').item.json;\n\nconst resp = await this.helpers.httpRequest({\n  method: 'POST',\n  url: 'http://fastapi_backend:8000/internal/process-plan',\n  body: {\n    raw_plan: rawPlan,\n    requested_types: upstream.requested_types,\n    n_charts: upstream.n_charts,\n    user_prompt: upstream.user_prompt,\n    is_retry: false,\n  },\n  json: true,\n});\n\nreturn [{\n  json: {\n    specs: resp.specs,\n    need_retry: resp.need_retry,\n    db_path: upstream.db_path,\n    schema_text: upstream.schema_text,\n    user_prompt: upstream.user_prompt,\n    plan_prompt: upstream.prompt,\n  },\n}];"
       },
       "id": "ffff6666-0000-0000-0000-000000000006",
@@ -419,8 +412,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1024,
-        120
+        1328,
+        976
       ]
     },
     {
@@ -451,14 +444,12 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        1280,
-        120
+        1632,
+        960
       ]
     },
     {
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "language": "javaScript",
         "jsCode": "const base = $('Przetworz Plan').item.json;\nconst prompt = base.plan_prompt + \"\\nUWAGA: POPRZEDNI PLAN byl w obcym jezyku. Pola 'title' i 'goal' MUSZA byc napisane WYLACZNIE po polsku.\";\nreturn [{ json: { prompt } }];"
       },
       "id": "hhhh8888-0000-0000-0000-000000000008",
@@ -466,29 +457,26 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1536,
-        0
+        1744,
+        656
       ]
     },
     {
       "parameters": {
         "promptType": "define",
-        "text": "={{ $json.prompt }}",
-        "hasOutputParser": false
+        "text": "={{ $json.prompt }}"
       },
       "id": "iiii9999-0000-0000-0000-000000000009",
       "name": "LLM Chain: Plan Retry",
       "type": "@n8n/n8n-nodes-langchain.chainLlm",
       "typeVersion": 1.6,
       "position": [
-        1792,
-        0
+        960,
+        608
       ]
     },
     {
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "language": "javaScript",
         "jsCode": "const chainText = $json.text || '';\nconst cleaned = chainText.replace(/```json/gi, '').replace(/```/g, '').trim();\nlet rawPlan;\ntry { rawPlan = JSON.parse(cleaned); } catch (e) { rawPlan = { charts: [] }; }\nconst upstream = $('Przetworz Plan').item.json;\nconst resp = await this.helpers.httpRequest({\n  method: 'POST',\n  url: 'http://fastapi_backend:8000/internal/process-plan',\n  body: {\n    raw_plan: rawPlan,\n    requested_types: [],\n    n_charts: (upstream.specs && upstream.specs.length) || 3,\n    user_prompt: upstream.user_prompt,\n    is_retry: true,\n  },\n  json: true,\n});\nreturn [{ json: {\n  specs: resp.specs,\n  db_path: upstream.db_path,\n  schema_text: upstream.schema_text,\n  user_prompt: upstream.user_prompt,\n} }];"
       },
       "id": "jjjjaaaa-0000-0000-0000-00000000000a",
@@ -496,8 +484,70 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
+        1392,
+        624
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-charts",
+              "leftValue": "={{ $json.charts.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "kkkkbbbb-0000-0000-0000-00000000000b",
+      "name": "Sa Wykresy?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "return [{ json: { error: 'Model nie wygenerowal poprawnego SQL dla zadnego z zaplanowanych wykresow (po probach retry). Sprobuj prostszy cel albo inne typy wykresow.' } }];"
+      },
+      "id": "llllcccc-0000-0000-0000-00000000000c",
+      "name": "Zbuduj Blad Brak Wykresow",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
         2048,
-        0
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ error: $json.error }) }}",
+        "options": {}
+      },
+      "id": "mmmmdddd-0000-0000-0000-00000000000d",
+      "name": "Odpowiedz Blad",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        2304,
+        400
       ]
     }
   ],
@@ -678,7 +728,7 @@
       "main": [
         [
           {
-            "node": "Metabase Login",
+            "node": "Sa Wykresy?",
             "type": "main",
             "index": 0
           }
@@ -779,6 +829,35 @@
         [
           {
             "node": "Generuj SQL i Zbierz Wykresy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sa Wykresy?": {
+      "main": [
+        [
+          {
+            "node": "Metabase Login",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Zbuduj Blad Brak Wykresow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zbuduj Blad Brak Wykresow": {
+      "main": [
+        [
+          {
+            "node": "Odpowiedz Blad",
             "type": "main",
             "index": 0
           }

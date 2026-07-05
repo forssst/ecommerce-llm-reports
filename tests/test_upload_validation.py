@@ -34,8 +34,9 @@ def test_uszkodzony_sqlite_nie_daje_500(user_a):
 
 
 def test_za_duzy_plik_odrzucony(user_a):
-    """Plik powyżej limitu (20 MB) powinien zostać odrzucony. ~24 MB CSV."""
-    big = b"a,b,c\n" + (b"1,2,3\n" * 4_000_000)
+    """Plik powyżej limitu (50 MB — podniesiony żeby zmieścić northwind.db ~24MB)
+    powinien zostać odrzucony. ~60 MB CSV."""
+    big = b"a,b,c\n" + (b"1,2,3\n" * 10_000_000)
     r = _upload(user_a, "ogromny.csv", big)
     assert r.status_code in (400, 413), f"duzy plik przyjety (status {r.status_code})"
 

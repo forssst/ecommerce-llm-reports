@@ -177,21 +177,30 @@ def _parse_requested_charts(text: str) -> list:
 
 def _find_date_column(schema_name: str):
     """Zwraca nazwę pierwszej kolumny datowej w schemacie PostgreSQL lub None."""
+    cols = _find_date_columns(schema_name)
+    return cols[0] if cols else None
+
+
+def _find_date_columns(schema_name: str):
+    """Zwraca WSZYSTKIE (unikalne) nazwy kolumn datowych w schemacie. Uzywane do
+    dopasowania kolumny daty PER WYKRES (main.py: 'Przygotuj Wykresy' w n8n) —
+    baza moze miec kilka tabel z roznymi kolumnami dat (np. data_rejestracji,
+    data_zatrudnienia, data_podpisania), wiec jedna globalna kolumna (stare
+    zachowanie _find_date_column) czesto nie pasuje do konkretnego wykresu."""
     try:
         conn = _pg_conn()
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT column_name FROM information_schema.columns
+                SELECT DISTINCT column_name FROM information_schema.columns
                 WHERE table_schema = %s
                   AND data_type IN ('date','timestamp','timestamp without time zone',
                                     'timestamp with time zone')
-                LIMIT 1
             """, (schema_name,))
-            row = cur.fetchone()
+            rows = cur.fetchall()
         conn.close()
-        return row[0] if row else None
+        return [r[0] for r in rows]
     except Exception:
-        return None
+        return []
 
 
 def _get_mb_date_fields(token: str, db_id: int) -> list:
@@ -1049,7 +1058,7 @@ def update_prompts(body: PromptsIn, _: int = Depends(verify_token)):
     return {"ok": True, "prompts": PROMPTS}
 
 
-MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MB
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB (northwind.db z pliki_testowe ma ~24MB)
 
 
 @app.post("/upload")
@@ -1401,4 +1410,5 @@ def internal_finalize_chart(body: InternalFinalizeChartIn):
 
 @app.get("/internal/date-column")
 def internal_date_column(schema_name: str):
-    return {"date_column": _find_date_column(schema_name)}
+    cols = _find_date_columns(schema_name)
+    return {"date_column": cols[0] if cols else None, "date_columns": cols}
