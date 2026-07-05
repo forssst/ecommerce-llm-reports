@@ -997,7 +997,7 @@ def describe_schema(body: DescribeIn, _: int = Depends(verify_token)):
     try:
         r = http.post(f"{OLLAMA_URL}/api/generate",
                       json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
-                      timeout=180)
+                      timeout=300)
         r.raise_for_status()
         desc = (r.json().get("response") or "").strip()
         if not desc:

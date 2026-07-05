@@ -104,8 +104,14 @@ export default function App() {
         body: JSON.stringify({ schema_text: schemaText }),
       });
       const data = await res.json();
-      setDescription(data.description || "");
-    } catch { setDescription(""); }
+      if (!res.ok) {
+        setDescription("⚠ Nie udało się wygenerować opisu (model zbyt wolny lub błąd). Kliknij 'Generuj opis AI' ponownie.");
+      } else {
+        setDescription(data.description || "");
+      }
+    } catch {
+      setDescription("⚠ Błąd połączenia z serwerem podczas generowania opisu. Spróbuj ponownie.");
+    }
     setIsGeneratingDesc(false);
   };
 
