@@ -3,12 +3,12 @@
 To najważniejszy blok. Sprawdza, czy zalogowany użytkownik B może odczytać albo
 zmodyfikować zasoby użytkownika A (bazy, historię). Poprawnie: NIE może → 403/404.
 
-UWAGA (stan na 2026-07-03): część tych testów jest oznaczona `xfail` — obecny
-backend weryfikuje TYLKO ważność tokenu (`verify_token`), ale NIE sprawdza, czy
-`user_id`/ID z URL należy do właściciela tokenu. To realna luka typu IDOR
-(Insecure Direct Object Reference). xfail = "wiemy, że teraz przechodzi źle";
-gdy dodasz kontrolę właściciela, testy zmienią się w XPASS i wtedy usuń markery.
-Materiał wprost do rozdziału 'Bezpieczeństwo'.
+UWAGA (naprawione 2026-07-05): wcześniej backend weryfikował TYLKO ważność tokenu
+(`verify_token`), ale nie sprawdzał, czy `user_id`/ID z URL należy do właściciela
+tokenu — realna luka IDOR (Insecure Direct Object Reference). Dodano porównanie
+tokenu z właścicielem zasobu w `/users/{id}/databases`, `/users/{id}/queries`,
+`DELETE /databases/{id}` oraz w `/generate` (user_id brany z tokenu, nie z body).
+Materiał do rozdziału 'Bezpieczeństwo' — opisać jako znalezioną i naprawioną lukę.
 """
 import io
 import requests
@@ -43,8 +43,6 @@ def test_a_widzi_wlasne_bazy(user_a, db_of_a):
     assert any(d["id"] == db_of_a[0] for d in r.json())
 
 
-@pytest.mark.xfail(reason="IDOR: brak kontroli właściciela w GET /users/{id}/databases",
-                   strict=False)
 def test_b_nie_widzi_baz_a(user_a, user_b, db_of_a):
     """B, podając w URL user_id konta A, NIE powinien dostać jego baz."""
     r = requests.get(f"{BASE_URL}/users/{user_a['id']}/databases",
@@ -53,8 +51,6 @@ def test_b_nie_widzi_baz_a(user_a, user_b, db_of_a):
     assert r.status_code == 403 or all(d["id"] != db_of_a[0] for d in r.json())
 
 
-@pytest.mark.xfail(reason="IDOR: brak kontroli właściciela w GET /users/{id}/queries",
-                   strict=False)
 def test_b_nie_widzi_historii_a(user_a, user_b):
     """B nie powinien odczytać historii zapytań konta A przez jego user_id w URL."""
     r = requests.get(f"{BASE_URL}/users/{user_a['id']}/queries",
@@ -62,8 +58,6 @@ def test_b_nie_widzi_historii_a(user_a, user_b):
     assert r.status_code == 403
 
 
-@pytest.mark.xfail(reason="brak kontroli właściciela w DELETE /databases/{id}",
-                   strict=False)
 def test_b_nie_moze_usunac_bazy_a(user_b, db_of_a):
     """B nie powinien móc usunąć bazy należącej do A (tylko po znajomości ID)."""
     db_id = db_of_a[0]
@@ -72,8 +66,6 @@ def test_b_nie_moze_usunac_bazy_a(user_b, db_of_a):
     assert r.status_code in (403, 404)
 
 
-@pytest.mark.xfail(reason="POST /generate ufa user_id z body zamiast tokenowi",
-                   strict=False)
 def test_b_nie_moze_generowac_jako_a(user_a, user_b, db_of_a):
     """B wysyła /generate z user_id konta A w body — wpis w historii nie powinien
     powstać na koncie A (albo żądanie odrzucone)."""

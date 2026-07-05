@@ -1048,28 +1048,48 @@ def update_prompts(body: PromptsIn, _: int = Depends(verify_token)):
     return {"ok": True, "prompts": PROMPTS}
 
 
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MB
+
+
 @app.post("/upload")
 async def upload_database(user_id: int = Form(...), file: UploadFile = File(...),
                           db: Session = Depends(database.get_db),
                           token_user_id: int = Depends(verify_token)):
-    ext = os.path.splitext(file.filename)[1].lower()
-    tmp_path = f"/tmp/_upload_{file.filename}"
+    user_id = token_user_id  # nie ufaj user_id z formularza — właścicielem jest zalogowany user
+    orig_name = os.path.basename(file.filename or "upload")
+    ext = os.path.splitext(orig_name)[1].lower()
+    # nazwa pliku na dysku NIE pochodzi od użytkownika (path traversal) — losowy identyfikator
+    tmp_path = f"/tmp/_upload_{uuid.uuid4().hex}{ext}"
 
+    size = 0
     with open(tmp_path, "wb") as buf:
-        shutil.copyfileobj(file.file, buf)
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > MAX_UPLOAD_BYTES:
+                buf.close()
+                os.remove(tmp_path)
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"Plik za duży — limit {MAX_UPLOAD_BYTES // (1024 * 1024)} MB")
+            buf.write(chunk)
 
     # Wczytaj wszystkie tabele do słownika DataFrame-ów
     dfs: dict = {}
     try:
         if ext in (".db", ".sqlite", ".sqlite3"):
             sq = sqlite3.connect(tmp_path)
-            cur = sq.cursor()
-            cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
-            for (tname,) in cur.fetchall():
-                dfs[tname] = pd.read_sql(f'SELECT * FROM "{tname}"', sq)
-            sq.close()
+            try:
+                cur = sq.cursor()
+                cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                for (tname,) in cur.fetchall():
+                    dfs[tname] = pd.read_sql(f'SELECT * FROM "{tname}"', sq)
+            finally:
+                sq.close()
         elif ext == ".csv":
-            stem = re.sub(r"[^\w]", "_", os.path.splitext(file.filename)[0])
+            stem = re.sub(r"[^\w]", "_", os.path.splitext(orig_name)[0])
             dfs[stem] = pd.read_csv(tmp_path, encoding="utf-8-sig")
         elif ext in (".xlsx", ".xls"):
             xls = pd.ExcelFile(tmp_path)
@@ -1078,10 +1098,17 @@ async def upload_database(user_id: int = Form(...), file: UploadFile = File(...)
                 dfs[tname] = pd.read_excel(xls, sheet_name=sheet)
         else:
             raise HTTPException(status_code=400, detail="Nieobsługiwany format pliku.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Nie udało się odczytać pliku: {e}")
     finally:
         os.remove(tmp_path)
 
-    schema_name = _sanitize_schema(user_id, file.filename)
+    if not dfs:
+        raise HTTPException(status_code=400, detail="Plik nie zawiera żadnych danych.")
+
+    schema_name = _sanitize_schema(user_id, orig_name)
 
     # Załaduj do PostgreSQL (usuń stary schemat jeśli istnieje)
     from sqlalchemy import create_engine, text as sa_text
@@ -1132,7 +1159,7 @@ async def upload_database(user_id: int = Form(...), file: UploadFile = File(...)
 
     schema = get_db_schema(schema_name)
     compact_schema = {t: [c["name"] for c in info["columns"]] for t, info in schema.items()}
-    rec = models.Database(user_id=user_id, name=file.filename,
+    rec = models.Database(user_id=user_id, name=orig_name,
                           file_path=schema_name, schema_json=compact_schema)
     db.add(rec); db.commit(); db.refresh(rec)
     return {"id": rec.id, "name": rec.name, "message": "Baza wgrana pomyślnie!"}
@@ -1141,6 +1168,8 @@ async def upload_database(user_id: int = Form(...), file: UploadFile = File(...)
 @app.get("/users/{user_id}/databases")
 def get_user_databases(user_id: int, db: Session = Depends(database.get_db),
                        token_user_id: int = Depends(verify_token)):
+    if user_id != token_user_id:
+        raise HTTPException(status_code=403, detail="Brak dostępu do cudzych zasobów")
     rows = db.query(models.Database).filter_by(user_id=user_id).order_by(
         models.Database.uploaded_at.desc()).all()
     result = []
@@ -1159,10 +1188,12 @@ def get_user_databases(user_id: int, db: Session = Depends(database.get_db),
 
 @app.delete("/databases/{db_id}")
 def delete_database(db_id: int, db: Session = Depends(database.get_db),
-                    _: int = Depends(verify_token)):
+                    token_user_id: int = Depends(verify_token)):
     rec = db.query(models.Database).filter_by(id=db_id).first()
     if not rec:
         raise HTTPException(status_code=404, detail="Baza nie istnieje")
+    if rec.user_id != token_user_id:
+        raise HTTPException(status_code=403, detail="Brak dostępu do cudzych zasobów")
     schema_name = rec.file_path
     # Usuń schemat z PostgreSQL jeśli wygląda jak pg schema (u{id}_nazwa)
     if schema_name and re.match(r'^u\d+_', schema_name):
@@ -1184,6 +1215,8 @@ def delete_database(db_id: int, db: Session = Depends(database.get_db),
 @app.get("/users/{user_id}/queries")
 def get_user_queries(user_id: int, db: Session = Depends(database.get_db),
                      token_user_id: int = Depends(verify_token)):
+    if user_id != token_user_id:
+        raise HTTPException(status_code=403, detail="Brak dostępu do cudzych zasobów")
     rows = db.query(models.Query).filter_by(user_id=user_id).order_by(
         models.Query.created_at.desc()).limit(20).all()
     return [{"id": r.id, "prompt": r.prompt_nl, "sql": r.generated_sql,
@@ -1192,7 +1225,8 @@ def get_user_queries(user_id: int, db: Session = Depends(database.get_db),
 
 @app.post("/generate")
 def generate(g: GenerateIn, db: Session = Depends(database.get_db),
-             _: int = Depends(verify_token)):
+             token_user_id: int = Depends(verify_token)):
+    g.user_id = token_user_id  # nie ufaj user_id z body — historia zapytań idzie na konto z tokenu
     db_obj = db.query(models.Database).filter_by(file_path=g.db_path).first()
     db_id = db_obj.id if db_obj else 1
 
