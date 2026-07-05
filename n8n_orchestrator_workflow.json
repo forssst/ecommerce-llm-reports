@@ -1,0 +1,577 @@
+{
+  "name": "Metabase - Utwórz Dashboard",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        560,
+        448
+      ],
+      "typeVersion": 1,
+      "id": "decea5d3-9861-454a-ab1a-e94e5acb7ab0",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "create-dashboard",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "5ca1c8b9-2cde-496e-ae37-6b4c21b5c0b7",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        512,
+        -80
+      ],
+      "webhookId": "1d6e711f-0d6c-4fe3-82f5-7d46cab106bc"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://metabase:3000/api/session",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"username\": \"szymonforstkl3trgwitam@gmail.com\", \"password\": \"Szym0nMetabase\"}",
+        "options": {}
+      },
+      "id": "580ff816-f284-42c3-b1d7-4927348943eb",
+      "name": "Metabase Login",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        736,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://metabase:3000/api/database",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Metabase-Session",
+              "value": "={{ $('Metabase Login').item.json.id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "5e74ce96-06bc-4146-b755-403f5c95d1b5",
+      "name": "Pobierz Bazy",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        960,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const token = $('Metabase Login').item.json.id;\nconst dbPath = $('Webhook').item.json.body.db_path;\nconst dbName = dbPath.split('/').pop();\n\nconst resp = $input.item.json;\nconst dbArray = Array.isArray(resp) ? resp : (resp.data || []);\nconst found = dbArray.find(db => db.name === dbName);\n\nreturn [{\n  json: {\n    token,\n    db_name: dbName,\n    db_id: found ? found.id : null,\n    db_exists: !!found,\n    charts: $('Generuj SQL i Zbierz Wykresy').item.json.charts\n  }\n}];"
+      },
+      "id": "83189c14-2e83-4798-a28e-9943b80d45bc",
+      "name": "Sprawdź DB",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1184,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-1",
+              "leftValue": "={{ $json.db_exists }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "271b68dc-a46e-4906-9023-552e0175c910",
+      "name": "DB Istnieje?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1392,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://metabase:3000/api/database",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Metabase-Session",
+              "value": "={{ $json.token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({engine: 'postgres', name: $json.db_name, details: {host: 'postgres', port: 5432, dbname: 'analytics', user: 'analyst', password: 'analyst', ssl: false, 'additional-options': 'currentSchema=' + $json.db_name}, is_full_sync: true}) }}",
+        "options": {}
+      },
+      "id": "c552c349-8541-45f3-a312-3e2ef30be048",
+      "name": "Zarejestruj DB",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1616,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const prev = $input.item.json;\nconst db_id = prev.id != null ? prev.id : prev.db_id;\nconst token = $('Sprawdź DB').item.json.token;\nconst charts = $('Sprawdź DB').item.json.charts;\n\nreturn [{ json: { db_id, token, charts } }];"
+      },
+      "id": "f80e19d9-f427-4c66-80ea-3b65e66e832a",
+      "name": "Scal DB ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1840,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://metabase:3000/api/dashboard",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Metabase-Session",
+              "value": "={{ $json.token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"name\": \"Dashboard Analityczny AI\"}",
+        "options": {}
+      },
+      "id": "f34ea0b0-931a-49e7-88bf-234882a6181e",
+      "name": "Utwórz Dashboard",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2064,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const dashId = $input.item.json.id;\nconst token = $('Scal DB ID').item.json.token;\nconst dbId = $('Scal DB ID').item.json.db_id;\nconst charts = $('Scal DB ID').item.json.charts;\nconst dateColumn = $('Generuj SQL i Zbierz Wykresy').first().json.date_column || null;\n\nreturn charts.map(chart => {\n  let sql = chart.sql;\n  let hasDateFilter = false;\n\n  if (dateColumn && sql.toLowerCase().includes(dateColumn.toLowerCase())) {\n    const hasWhere = /\\bWHERE\\b/i.test(sql);\n    const snippet = `[[AND ${dateColumn} >= {{start_date}}]] [[AND ${dateColumn} <= {{end_date}}]]`;\n\n    if (hasWhere) {\n      if (/\\b(GROUP\\s+BY|ORDER\\s+BY|LIMIT|HAVING)\\b/i.test(sql)) {\n        sql = sql.replace(/\\b(GROUP\\s+BY|ORDER\\s+BY|LIMIT|HAVING)\\b/i, snippet + ' $1');\n      } else {\n        sql = sql + ' ' + snippet;\n      }\n    } else {\n      const whereSnippet = `WHERE 1=1 ${snippet}`;\n      if (/\\b(GROUP\\s+BY|ORDER\\s+BY|LIMIT|HAVING)\\b/i.test(sql)) {\n        sql = sql.replace(/\\b(GROUP\\s+BY|ORDER\\s+BY|LIMIT|HAVING)\\b/i, whereSnippet + ' $1');\n      } else {\n        sql = sql + ' ' + whereSnippet;\n      }\n    }\n    hasDateFilter = true;\n  }\n\n  return {\n    json: {\n      dash_id: dashId,\n      token,\n      db_id: dbId,\n      title: chart.title,\n      sql,\n      display: chart.display,\n      columns: chart.columns || [],\n      has_date_filter: hasDateFilter\n    }\n  };\n});"
+      },
+      "id": "31e2aa06-2706-446a-a39f-e79ea5903b9a",
+      "name": "Przygotuj Wykresy",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2272,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://metabase:3000/api/card",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Metabase-Session",
+              "value": "={{ $json.token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  name: $json.title,\n  dataset_query: {\n    database: $json.db_id,\n    type: 'native',\n    native: {\n      query: $json.sql,\n      'template-tags': $json.has_date_filter ? {\n        'start_date': {id: 'tag-start', name: 'start_date', 'display_name': 'Data od', type: 'text', required: false, default: null},\n        'end_date':   {id: 'tag-end',   name: 'end_date',   'display_name': 'Data do', type: 'text', required: false, default: null}\n      } : {}\n    }\n  },\n  display: $json.display,\n  visualization_settings: $json.display === 'pie'\n    ? {'pie.dimension': ($json.columns)[0], 'pie.metric': ($json.columns)[1]}\n    : ($json.display === 'bar' || $json.display === 'line' || $json.display === 'area')\n      ? {'graph.dimensions': [($json.columns)[0]], 'graph.metrics': ($json.columns).slice(1)}\n      : {}\n}) }}",
+        "options": {}
+      },
+      "id": "cc6a1b67-035b-472f-96ae-5cb792245c69",
+      "name": "Utwórz Kartę",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2496,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "destinationFieldName": "cards",
+        "options": {}
+      },
+      "id": "b7a6f0a5-4452-431c-8406-4136ce46eb0f",
+      "name": "Zbierz Karty",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        2720,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const cards = $input.item.json.cards;\nconst dashId = $('Przygotuj Wykresy').first().json.dash_id;\nconst token = $('Przygotuj Wykresy').first().json.token;\n\nconst PARAM_START = 'f1c3e2d4-a1b2-c3d4-e5f6-a7b8c9d0e1f2';\nconst PARAM_END   = 'a2b4c6d8-1234-5678-abcd-ef0123456789';\n\n// Metabase nowszych wersji zwraca native query w dataset_query.stages[0], nie\n// dataset_query.native (patrz pamiec projektu) — sprawdzamy oba miejsca.\nfunction getTags(card) {\n  return (card.dataset_query?.stages?.[0]?.['template-tags'])\n      || (card.dataset_query?.native?.['template-tags'])\n      || {};\n}\n\nconst dashcards = cards.map((card, idx) => {\n  const tags = getTags(card);\n  const hasFilter = Object.keys(tags).length > 0;\n  return {\n    id: -(idx + 1),\n    card_id: card.id,\n    row: Math.floor(idx / 2) * 8,\n    col: (idx % 2) * 12,\n    size_x: 12,\n    size_y: 8,\n    parameter_mappings: hasFilter ? [\n      {card_id: card.id, parameter_id: PARAM_START, target: ['variable', ['template-tag', 'start_date']]},\n      {card_id: card.id, parameter_id: PARAM_END,   target: ['variable', ['template-tag', 'end_date']]}\n    ] : []\n  };\n});\n\nconst anyHasFilter = cards.some(c => Object.keys(getTags(c)).length > 0);\n\nconst dashParams = anyHasFilter ? [\n  {id: PARAM_START, name: 'Data od', slug: 'data_od', type: 'date/single', sectionId: 'date'},\n  {id: PARAM_END,   name: 'Data do', slug: 'data_do', type: 'date/single', sectionId: 'date'}\n] : [];\n\nreturn [{ json: { dashcards, dash_id: dashId, token, dashParams } }];"
+      },
+      "id": "e6612eb0-2913-485d-b7d9-8b34e50197a6",
+      "name": "Zbuduj Układ",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2944,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=http://metabase:3000/api/dashboard/{{ $json.dash_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Metabase-Session",
+              "value": "={{ $json.token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ parameters: $json.dashParams }) }}",
+        "options": {}
+      },
+      "id": "97679b9d-12bf-489c-8e8b-e4b0b7ff71fe",
+      "name": "Dodaj Parametry",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        3152,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=http://metabase:3000/api/dashboard/{{ $('Zbuduj Układ').item.json.dash_id }}/cards",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Metabase-Session",
+              "value": "={{ $('Zbuduj Układ').item.json.token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ cards: $('Zbuduj Układ').item.json.dashcards }) }}",
+        "options": {}
+      },
+      "id": "576cc52e-1666-468b-88a4-22d8251a5240",
+      "name": "Dodaj Karty",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        3376,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://metabase:3000/api/dashboard/{{ $('Zbuduj Układ').item.json.dash_id }}/public_link",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Metabase-Session",
+              "value": "={{ $('Zbuduj Układ').item.json.token }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ae414fd5-eb71-44b4-85b9-a06dc994fe72",
+      "name": "Opublikuj",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        3600,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ url: 'http://localhost:3000/public/dashboard/' + $json.uuid }) }}",
+        "options": {}
+      },
+      "id": "ef0a12fe-1c1d-4009-b3d9-f249ea757b64",
+      "name": "Odpowiedz",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        3824,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const body = $('Webhook').item.json.body;\nconst BACKEND = 'http://fastapi_backend:8000';\nconst OLLAMA = 'http://ollama:11434';\nconst MODEL = 'qwen2.5-coder:7b';\n\nasync function callBackend(path, payload) {\n  return await this.helpers.httpRequest({\n    method: 'POST',\n    url: BACKEND + path,\n    body: payload,\n    json: true,\n  });\n}\n\nasync function callOllama(prompt) {\n  const r = await this.helpers.httpRequest({\n    method: 'POST',\n    url: OLLAMA + '/api/generate',\n    body: { model: MODEL, prompt: prompt, stream: false, format: 'json' },\n    json: true,\n    timeout: 180000,\n  });\n  return JSON.parse(r.response || '{}');\n}\n\nconst planPromptResp = await callBackend('/internal/plan-prompt', {\n  goal: body.prompt,\n  chart_type: body.chart_type || '',\n  description: body.description || '',\n  schema_text: body.schema_text || '',\n});\n\nlet rawPlan = await callOllama(planPromptResp.prompt);\n\nlet planResp = await callBackend('/internal/process-plan', {\n  raw_plan: rawPlan,\n  requested_types: planPromptResp.requested_types,\n  n_charts: planPromptResp.n_charts,\n  user_prompt: body.prompt,\n  is_retry: false,\n});\n\nif (planResp.need_retry) {\n  const retryPrompt = planPromptResp.prompt +\n    \"\\nUWAGA: POPRZEDNI PLAN byl w obcym jezyku. Pola 'title' i 'goal' MUSZA byc napisane WYLACZNIE po polsku.\";\n  rawPlan = await callOllama(retryPrompt);\n  planResp = await callBackend('/internal/process-plan', {\n    raw_plan: rawPlan,\n    requested_types: planPromptResp.requested_types,\n    n_charts: planPromptResp.n_charts,\n    user_prompt: body.prompt,\n    is_retry: true,\n  });\n}\n\nreturn [{\n  json: {\n    specs: planResp.specs,\n    db_path: body.db_path,\n    schema_text: body.schema_text,\n    user_prompt: body.prompt,\n  },\n}];"
+      },
+      "id": "aaaa1111-0000-0000-0000-000000000001",
+      "name": "Zaplanuj Wykresy",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        512,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const input = $input.first().json; // {specs, db_path, schema_text, user_prompt}\nconst BACKEND = 'http://fastapi_backend:8000';\nconst OLLAMA = 'http://ollama:11434';\nconst MODEL = 'qwen2.5-coder:7b';\n\nasync function callBackend(path, payload) {\n  return await this.helpers.httpRequest({\n    method: 'POST',\n    url: BACKEND + path,\n    body: payload,\n    json: true,\n  });\n}\n\nasync function callOllama(prompt) {\n  const r = await this.helpers.httpRequest({\n    method: 'POST',\n    url: OLLAMA + '/api/generate',\n    body: { model: MODEL, prompt: prompt, stream: false, format: 'json' },\n    json: true,\n    timeout: 180000,\n  });\n  return JSON.parse(r.response || '{}');\n}\n\nconst charts = [];\nfor (const spec of input.specs) {\n  let sql = '', ok = false, err = '', cols = [], sample = [];\n  for (let attempt = 0; attempt < 3; attempt++) {\n    const sqlPromptResp = await callBackend('/internal/sql-prompt', {\n      goal: spec.goal,\n      chart_type: spec.chart_type || '',\n      schema_text: input.schema_text,\n      prev_sql: sql,\n      prev_err: err,\n    });\n    const rawOut = await callOllama(sqlPromptResp.prompt);\n    const rawSql = (rawOut && rawOut.sql) || '';\n    const validated = await callBackend('/internal/process-sql-attempt', {\n      schema_name: input.db_path,\n      chart_type: spec.chart_type || '',\n      raw_sql: rawSql,\n    });\n    sql = validated.sql;\n    ok = validated.ok;\n    err = validated.error || '';\n    cols = validated.columns;\n    sample = validated.sample;\n    if (ok && sql) break;\n  }\n  if (!ok || !sql) continue;\n  const finalized = await callBackend('/internal/finalize-chart', {\n    title: spec.title,\n    sql: sql,\n    chart_type: spec.chart_type || '',\n    columns: cols,\n    sample: sample,\n    user_prompt: input.user_prompt,\n  });\n  charts.push({ title: finalized.title, sql: sql, display: finalized.display, columns: cols });\n}\n\nconst dateColResp = await this.helpers.httpRequest({\n  method: 'GET',\n  url: BACKEND + '/internal/date-column?schema_name=' + encodeURIComponent(input.db_path),\n  json: true,\n});\n\nreturn [{\n  json: {\n    charts: charts,\n    db_path: input.db_path,\n    user_prompt: input.user_prompt,\n    date_column: dateColResp.date_column || null,\n  },\n}];"
+      },
+      "id": "bbbb2222-0000-0000-0000-000000000002",
+      "name": "Generuj SQL i Zbierz Wykresy",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        768,
+        120
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Zaplanuj Wykresy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Metabase Login": {
+      "main": [
+        [
+          {
+            "node": "Pobierz Bazy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pobierz Bazy": {
+      "main": [
+        [
+          {
+            "node": "Sprawdź DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sprawdź DB": {
+      "main": [
+        [
+          {
+            "node": "DB Istnieje?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB Istnieje?": {
+      "main": [
+        [
+          {
+            "node": "Scal DB ID",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Zarejestruj DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zarejestruj DB": {
+      "main": [
+        [
+          {
+            "node": "Scal DB ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scal DB ID": {
+      "main": [
+        [
+          {
+            "node": "Utwórz Dashboard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Utwórz Dashboard": {
+      "main": [
+        [
+          {
+            "node": "Przygotuj Wykresy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Przygotuj Wykresy": {
+      "main": [
+        [
+          {
+            "node": "Utwórz Kartę",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Utwórz Kartę": {
+      "main": [
+        [
+          {
+            "node": "Zbierz Karty",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zbierz Karty": {
+      "main": [
+        [
+          {
+            "node": "Zbuduj Układ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zbuduj Układ": {
+      "main": [
+        [
+          {
+            "node": "Dodaj Parametry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dodaj Parametry": {
+      "main": [
+        [
+          {
+            "node": "Dodaj Karty",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dodaj Karty": {
+      "main": [
+        [
+          {
+            "node": "Opublikuj",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Opublikuj": {
+      "main": [
+        [
+          {
+            "node": "Odpowiedz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zaplanuj Wykresy": {
+      "main": [
+        [
+          {
+            "node": "Generuj SQL i Zbierz Wykresy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generuj SQL i Zbierz Wykresy": {
+      "main": [
+        [
+          {
+            "node": "Metabase Login",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  }
+}

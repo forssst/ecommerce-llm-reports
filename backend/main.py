@@ -640,6 +640,18 @@ def _ollama_json(prompt: str, timeout: int = 120, model: str = None):
         raise OllamaResponseError(f"Odpowiedź Ollamy nie jest poprawnym JSON: {e}")
 
 
+_VALID_DISPLAYS = {"bar", "line", "pie", "table", "area", "row", "scatter",
+                   "funnel", "smartscalar", "waterfall", "combo"}
+
+_CHART_HINTS = {
+    "scatter":     "- WYKRES PUNKTOWY: zwroc DOKLADNIE 2 kolumny NUMERYCZNE (np. avg_minutes, avg_price). BEZ kolumn tekstowych. Uzyj GROUP BY i AVG/SUM zeby zredukowac wiersze do sensownego zbioru punktow.\n",
+    "smartscalar": "- LICZNIK (smartscalar): to wykres TRENDU — zwroc DOKLADNIE 2 kolumny: miesiac (DATE_TRUNC('month', kolumna_daty)) i JEDEN agregat numeryczny, posortowane po miesiacu. Przyklad: SELECT DATE_TRUNC('month', invoicedate) AS miesiac, ROUND(SUM(total)::numeric,2) AS przychod FROM invoice GROUP BY 1 ORDER BY 1\n",
+    "funnel":      "- LEJKOWY (funnel): zwroc 2 kolumny — etykieta TEXT (np. nazwa etapu/kategorii) i wartosc numeryczna — posortowane MALEJACO.\n",
+    "waterfall":   "- KASKADOWY (waterfall): MUSISZ policzyc ROZNICE rok-do-roku uzywajac LAG(). Przyklad wzorca: WITH y AS (SELECT EXTRACT(YEAR FROM invoicedate)::int AS rok, SUM(total) AS rev FROM invoice GROUP BY 1) SELECT rok::text AS rok, ROUND((rev - LAG(rev) OVER (ORDER BY rok))::numeric, 2) AS zmiana FROM y WHERE LAG(rev) OVER (ORDER BY rok) IS NOT NULL ORDER BY rok. Zwroc 2 kolumny: kategoria (TEXT) i zmiana (NUMERIC, moze byc ujemna).\n",
+    "combo":       "- KOMBINOWANY (combo): zwroc kolumne daty/kategorii jako pierwsza, potem co najmniej 2 kolumny numeryczne (np. miesieczna sprzedaz i skumulowana). Sortuj ASC po dacie.\n",
+}
+
+
 def _generate_multichart(g, db, db_id):
     """Dekompozycja: planowanie -> SQL na kazdy wykres -> jeden dashboard.
     Zwraca None, gdy sie nie uda (wtedy /generate robi fallback do n8n)."""
@@ -687,17 +699,6 @@ def _generate_multichart(g, db, db_id):
 
     is_sqlcoder = "sqlcoder" in OLLAMA_SQL_MODEL.lower()
     sql_schema = _build_ddl_schema(g.db_path) if is_sqlcoder else g.schema_text
-
-    _VALID_DISPLAYS = {"bar", "line", "pie", "table", "area", "row", "scatter",
-                       "funnel", "smartscalar", "waterfall", "combo"}
-
-    _CHART_HINTS = {
-        "scatter":     "- WYKRES PUNKTOWY: zwroc DOKLADNIE 2 kolumny NUMERYCZNE (np. avg_minutes, avg_price). BEZ kolumn tekstowych. Uzyj GROUP BY i AVG/SUM zeby zredukowac wiersze do sensownego zbioru punktow.\n",
-        "smartscalar": "- LICZNIK (smartscalar): to wykres TRENDU — zwroc DOKLADNIE 2 kolumny: miesiac (DATE_TRUNC('month', kolumna_daty)) i JEDEN agregat numeryczny, posortowane po miesiacu. Przyklad: SELECT DATE_TRUNC('month', invoicedate) AS miesiac, ROUND(SUM(total)::numeric,2) AS przychod FROM invoice GROUP BY 1 ORDER BY 1\n",
-        "funnel":      "- LEJKOWY (funnel): zwroc 2 kolumny — etykieta TEXT (np. nazwa etapu/kategorii) i wartosc numeryczna — posortowane MALEJACO.\n",
-        "waterfall":   "- KASKADOWY (waterfall): MUSISZ policzyc ROZNICE rok-do-roku uzywajac LAG(). Przyklad wzorca: WITH y AS (SELECT EXTRACT(YEAR FROM invoicedate)::int AS rok, SUM(total) AS rev FROM invoice GROUP BY 1) SELECT rok::text AS rok, ROUND((rev - LAG(rev) OVER (ORDER BY rok))::numeric, 2) AS zmiana FROM y WHERE LAG(rev) OVER (ORDER BY rok) IS NOT NULL ORDER BY rok. Zwroc 2 kolumny: kategoria (TEXT) i zmiana (NUMERIC, moze byc ujemna).\n",
-        "combo":       "- KOMBINOWANY (combo): zwroc kolumne daty/kategorii jako pierwsza, potem co najmniej 2 kolumny numeryczne (np. miesieczna sprzedaz i skumulowana). Sortuj ASC po dacie.\n",
-    }
 
     charts = []
     total_retries = 0
@@ -1223,6 +1224,33 @@ def get_user_queries(user_id: int, db: Session = Depends(database.get_db),
              "status": r.status, "retry_count": r.retry_count} for r in rows]
 
 
+N8N_ORCHESTRATOR_URL = os.getenv("N8N_ORCHESTRATOR_URL", "http://n8n_local:5678/webhook/create-dashboard")
+
+
+def _generate_via_n8n_orchestrator(g, db, db_id):
+    """Eksperyment 'n8n jako orchestrator' (patrz plan resilient-prancing-bentley):
+    n8n prowadzi caly control-flow plan+SQL+walidacja+Metabase, wolajac cienkie
+    endpointy /internal/... zamiast duplikowac logike z _generate_multichart."""
+    payload = {
+        "prompt": g.prompt,
+        "schema_text": g.schema_text,
+        "chart_type": g.chart_type,
+        "description": g.description,
+        "db_path": g.db_path,
+    }
+    r = http.post(N8N_ORCHESTRATOR_URL, json=payload, timeout=max(g.n8n_timeout, 300))
+    r.raise_for_status()
+    data = r.json()
+    dash_url = data.get("url")
+    if not dash_url:
+        raise Exception(f"n8n orchestrator nie zwrocil url dashboardu: {data}")
+    rec = models.Query(user_id=g.user_id, database_id=db_id, prompt_nl=_full_prompt(g),
+                       generated_sql=json.dumps({"dashboard_url": dash_url}, ensure_ascii=False),
+                       status="success", retry_count=0)
+    db.add(rec); db.commit()
+    return {"status": "success", "metabase": {"url": dash_url}}
+
+
 @app.post("/generate")
 def generate(g: GenerateIn, db: Session = Depends(database.get_db),
              token_user_id: int = Depends(verify_token)):
@@ -1230,94 +1258,147 @@ def generate(g: GenerateIn, db: Session = Depends(database.get_db),
     db_obj = db.query(models.Database).filter_by(file_path=g.db_path).first()
     db_id = db_obj.id if db_obj else 1
 
-    # Najpierw multi-wykres (dekompozycja przez Ollamę). W razie czego -> fallback n8n niżej.
+    # EKSPERYMENT: n8n jako jedyna sciezka (nie fallback) — zamiast _generate_multichart.
+    # _generate_multichart zostaje w pliku NIETKNIETA jako martwy kod / punkt odniesienia.
     try:
-        multi = _generate_multichart(g, db, db_id)
-        if multi:
-            return multi
-    except OllamaUnavailableError as e:
-        # Ollama zupełnie niedostępna — nie ma sensu próbować n8n (też jej używa)
+        return _generate_via_n8n_orchestrator(g, db, db_id)
+    except Exception as e:
         rec = models.Query(user_id=g.user_id, database_id=db_id, prompt_nl=_full_prompt(g),
                            generated_sql="", status="error", retry_count=0)
         db.add(rec); db.commit()
-        return {"status": "error", "error": str(e)}
-    except Exception:
-        pass
+        return {"status": "error", "error": f"n8n orchestrator error: {e}"}
 
-    max_retries = 3
-    last_error = ""
-    base_query = (f"Cel główny: {g.prompt}\n"
-                  f"Wytyczne do dashboardu: {g.chart_type}\n"
-                  f"Dodatkowy opis bazy: {g.description}")
-    config_hint = _config_hint(g.chart_type)
 
-    for attempt in range(max_retries):
-        query_text = base_query
-        if last_error:
-            query_text += (f"\n\nUWAGA: poprzednia próba dała błędny SQL.\n"
-                           f"Błąd: {last_error}\n"
-                           "Popraw zapytania — użyj WYŁĄCZNIE istniejących tabel i kolumn ze schematu.")
-        payload = {"query": query_text, "schema": g.schema_text,
-                   "db_name": os.path.basename(g.db_path)}
-        try:
-            raw = _call_n8n(g.n8n_url, payload, g.n8n_timeout)
-            if raw:
-                raw = raw.replace("```json", "").replace("```", "").strip()
-            try:
-                dash_data = json.loads(raw)
-            except Exception as e:
-                last_error = f"Błąd parsowania JSON: {e}"
-                continue
-            if isinstance(dash_data, list):
-                dash_data = {"dashboard_title": "Dashboard Analityczny AI", "charts": dash_data}
+# ============================================================================
+# Wewnetrzne endpointy dla eksperymentu "n8n jako orchestrator" (patrz plan
+# resilient-prancing-bentley). Cienkie wrappery na sprawdzona logike z
+# _generate_multichart — n8n prowadzi control-flow (wolania Ollamy, retry,
+# petle), Python tylko formatuje prompty i waliduje SQL, zeby nie duplikowac
+# (i nie rozjechac) guardow wielokrotnie naprawianych w poprzednich sesjach.
+# Bez JWT: wolane tylko wewnatrz sieci dockerowej przez n8n.
+# ============================================================================
 
-            charts_raw = dash_data.get("charts", [])
-            normalized = []
-            problem = None
-            for idx, ch in enumerate(charts_raw):
-                title, sql, ctype = _normalize_chart(ch, idx)
-                if not sql:
-                    problem = f"Wykres '{title}' nie zawiera SQL."; break
-                sql = _clean_sql(sql)
-                ok, err, cols, sample = _run_and_validate(g.db_path, sql)
-                if not ok:
-                    problem = f"SQL dla '{title}' nie działa: {err}"; break
-                display = ctype or config_hint or _infer_display(cols, sample)
-                normalized.append((title, sql, display, cols))
+class InternalPlanPromptIn(BaseModel):
+    goal: str
+    chart_type: str = ""
+    description: str = ""
+    schema_text: str = ""
 
-            if problem or not normalized:
-                last_error = problem or "Brak poprawnych wykresów."
-                continue
 
-            mb_token = _get_metabase_token()
-            mb_db_id = _ensure_metabase_db(mb_token, g.db_path)
-            dash_title = dash_data.get("dashboard_title", "Dashboard Analityczny AI")
-            dash_id = create_metabase_dashboard(mb_token, dash_title)
+@app.post("/internal/plan-prompt")
+def internal_plan_prompt(body: InternalPlanPromptIn):
+    requested_types = _parse_requested_charts(body.chart_type)
+    n_charts = len(requested_types) if requested_types else (_parse_chart_count(body.chart_type) or 3)
+    if requested_types:
+        types_instruction = (
+            f"UZYTKOWNIK ZADA DOKLADNIE {n_charts} WYKRESOW W TEJ KOLEJNOSCI: "
+            + ", ".join(f"({i+1}) chart_type={t}" for i, t in enumerate(requested_types))
+            + "\nMUSISZ wygenerowac DOKLADNIE tyle elementow i uzyc DOKLADNIE tych typow chart_type."
+        )
+    else:
+        types_instruction = "Wygeneruj 3-4 roznorodne wykresy (bar, line, pie, table)."
+    prompt = PROMPTS["plan_prompt"].format(
+        types_instruction=types_instruction,
+        goal=body.goal,
+        chart_type=body.chart_type,
+        description=body.description,
+        schema_text=body.schema_text,
+    )
+    return {"prompt": prompt, "n_charts": n_charts, "requested_types": requested_types}
 
-            dashcards = []
-            for idx, (title, sql, display, cols) in enumerate(normalized):
-                card_id = create_metabase_card(mb_token, mb_db_id, title, sql, display, cols)
-                dashcards.append({"id": -(idx + 1), "card_id": card_id,
-                                  "row": (idx // 2) * 8, "col": (idx % 2) * 12,
-                                  "size_x": 12, "size_y": 8})
-            if dashcards:
-                r = http.put(f"{METABASE_URL}/api/dashboard/{dash_id}/cards",
-                             headers={"X-Metabase-Session": mb_token}, json={"cards": dashcards})
-                r.raise_for_status()
 
-            dash_url = publish_metabase_dashboard(mb_token, dash_id)
-            pretty_json = json.dumps(dash_data, indent=2, ensure_ascii=False)
-            rec = models.Query(user_id=g.user_id, database_id=db_id, prompt_nl=_full_prompt(g),
-                               generated_sql=pretty_json, status="success", retry_count=attempt)
-            db.add(rec); db.commit()
-            return {"status": "success", "sql": pretty_json,
-                    "retry_count": attempt, "metabase": {"url": dash_url}}
+class InternalProcessPlanIn(BaseModel):
+    raw_plan: dict | list
+    requested_types: list[str] = []
+    n_charts: int = 3
+    user_prompt: str = ""
+    is_retry: bool = False
 
-        except Exception as e:
-            last_error = f"Metabase / n8n Error: {e}"
-            continue
 
-    rec = models.Query(user_id=g.user_id, database_id=db_id, prompt_nl=_full_prompt(g),
-                       generated_sql="", status="error", retry_count=max_retries)
-    db.add(rec); db.commit()
-    return {"status": "error", "error": last_error}
+@app.post("/internal/process-plan")
+def internal_process_plan(body: InternalProcessPlanIn):
+    raw_plan = body.raw_plan
+    raw_specs = [s for s in (raw_plan.get("charts", []) if isinstance(raw_plan, dict) else []) if isinstance(s, dict)]
+    # Na pierwszym przebiegu (nie retry): jezyk obcy w planie -> sygnalizuj n8n zeby
+    # zapytalo Ollame jeszcze raz z ostrzezeniem (main.py:668-677). Na przebiegu retry
+    # uzywamy tego co przyszlo, nawet jesli nadal obce — tytul i tak ma fallback nizej
+    # (main.py:709-712), a Python tez nie sprawdza jezyka po raz drugi.
+    if not body.is_retry:
+        need_retry = bool(raw_specs) and any(
+            _is_foreign_language(f"{s.get('title', '')} {s.get('goal', '')}") for s in raw_specs)
+        if need_retry:
+            return {"specs": [], "need_retry": True}
+    specs = []
+    for i, spec in enumerate(raw_specs[:body.n_charts]):
+        if body.requested_types and i < len(body.requested_types):
+            spec["chart_type"] = body.requested_types[i]
+        title = spec.get("title") or ""
+        goal = spec.get("goal") or body.user_prompt
+        if not title or title.lower().startswith("wykres"):
+            title = goal[:60].strip()
+        if _is_foreign_language(title):
+            title = (body.user_prompt or goal)[:60].strip()
+        specs.append({"title": title, "goal": goal, "chart_type": spec.get("chart_type")})
+    return {"specs": specs, "need_retry": False}
+
+
+class InternalSqlPromptIn(BaseModel):
+    goal: str
+    chart_type: str = ""
+    schema_text: str = ""
+    prev_sql: str = ""
+    prev_err: str = ""
+
+
+@app.post("/internal/sql-prompt")
+def internal_sql_prompt(body: InternalSqlPromptIn):
+    ctype = (body.chart_type or "").strip().lower() or None
+    chart_hint = _CHART_HINTS.get(ctype, "")
+    prompt = PROMPTS["sql_prompt"].format(chart_hint=chart_hint, goal=body.goal, schema_text=body.schema_text)
+    if body.prev_err:
+        prompt += PROMPTS["sql_retry_suffix"].format(sql=body.prev_sql, err=body.prev_err)
+    return {"prompt": prompt}
+
+
+class InternalProcessSqlIn(BaseModel):
+    schema_name: str
+    chart_type: str = ""
+    raw_sql: str
+
+
+@app.post("/internal/process-sql-attempt")
+def internal_process_sql_attempt(body: InternalProcessSqlIn):
+    ctype = (body.chart_type or "").strip().lower() or None
+    sql = _clean_sql(body.raw_sql)
+    if _RELATIVE_DATE_FILTER.search(sql):
+        return {"ok": False, "sql": sql,
+                "error": ("SQL uzywa CURRENT_DATE/NOW() z INTERVAL do filtrowania WHERE — to zwroci PUSTY "
+                          "wynik, bo dane moga byc z innego okresu niz biezaca data serwera. Usun ten "
+                          "filtr calkowicie i pokaz PELNY zakres dat z tabeli, bez WHERE na kolumnie daty."),
+                "columns": [], "sample": []}
+    ok, verr, cols, sample = _run_and_validate(body.schema_name, sql, ctype)
+    return {"ok": ok, "sql": sql, "error": verr, "columns": cols, "sample": sample}
+
+
+class InternalFinalizeChartIn(BaseModel):
+    title: str
+    sql: str
+    chart_type: str = ""
+    columns: list = []
+    sample: list = []
+    user_prompt: str = ""
+
+
+@app.post("/internal/finalize-chart")
+def internal_finalize_chart(body: InternalFinalizeChartIn):
+    ctype = (body.chart_type or "").strip().lower() or None
+    title = body.title
+    if "where" not in body.sql.lower() and _RELATIVE_PERIOD_IN_TITLE.search(title):
+        title = _RELATIVE_PERIOD_IN_TITLE.sub("", title).strip(" ,–-") or (body.user_prompt or "")[:60].strip()
+    display = ctype if ctype in _VALID_DISPLAYS else _infer_display(body.columns, body.sample)
+    return {"title": title, "display": display}
+
+
+@app.get("/internal/date-column")
+def internal_date_column(schema_name: str):
+    return {"date_column": _find_date_column(schema_name)}
