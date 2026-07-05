@@ -24,6 +24,10 @@ plugins/
 .n8n_config/
 n8n_config/
 
+# Wyniki stress-testu (efemeryczne per-uruchomienie, nie kod)
+stress_test_results_*.csv
+stress_test_run.log
+
 # Kopie baz i duże pliki
 *.sqlite
 *.sqlite3
