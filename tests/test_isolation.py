@@ -73,7 +73,7 @@ def test_b_nie_moze_generowac_jako_a(user_a, user_b, db_of_a):
     payload = {"user_id": user_a["id"], "prompt": "cokolwiek",
                "db_path": file_path, "n8n_timeout": 30}
     requests.post(f"{BASE_URL}/generate", json=payload,
-                  headers=auth(user_b["token"]), timeout=120)
+                  headers=auth(user_b["token"]), timeout=300)
     # Wpis podszyty pod A nie powinien się pojawić w jego historii (czytanej przez A).
     hist = requests.get(f"{BASE_URL}/users/{user_a['id']}/queries",
                         headers=auth(user_a["token"]), timeout=TIMEOUT).json()

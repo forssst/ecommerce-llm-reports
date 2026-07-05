@@ -347,21 +347,6 @@
       "parameters": {
         "mode": "runOnceForAllItems",
         "language": "javaScript",
-        "jsCode": "const body = $('Webhook').item.json.body;\nconst BACKEND = 'http://fastapi_backend:8000';\nconst OLLAMA = 'http://ollama:11434';\nconst MODEL = 'qwen2.5-coder:7b';\n\nasync function callBackend(path, payload) {\n  return await this.helpers.httpRequest({\n    method: 'POST',\n    url: BACKEND + path,\n    body: payload,\n    json: true,\n  });\n}\n\nasync function callOllama(prompt) {\n  const r = await this.helpers.httpRequest({\n    method: 'POST',\n    url: OLLAMA + '/api/generate',\n    body: { model: MODEL, prompt: prompt, stream: false, format: 'json' },\n    json: true,\n    timeout: 180000,\n  });\n  return JSON.parse(r.response || '{}');\n}\n\nconst planPromptResp = await callBackend('/internal/plan-prompt', {\n  goal: body.prompt,\n  chart_type: body.chart_type || '',\n  description: body.description || '',\n  schema_text: body.schema_text || '',\n});\n\nlet rawPlan = await callOllama(planPromptResp.prompt);\n\nlet planResp = await callBackend('/internal/process-plan', {\n  raw_plan: rawPlan,\n  requested_types: planPromptResp.requested_types,\n  n_charts: planPromptResp.n_charts,\n  user_prompt: body.prompt,\n  is_retry: false,\n});\n\nif (planResp.need_retry) {\n  const retryPrompt = planPromptResp.prompt +\n    \"\\nUWAGA: POPRZEDNI PLAN byl w obcym jezyku. Pola 'title' i 'goal' MUSZA byc napisane WYLACZNIE po polsku.\";\n  rawPlan = await callOllama(retryPrompt);\n  planResp = await callBackend('/internal/process-plan', {\n    raw_plan: rawPlan,\n    requested_types: planPromptResp.requested_types,\n    n_charts: planPromptResp.n_charts,\n    user_prompt: body.prompt,\n    is_retry: true,\n  });\n}\n\nreturn [{\n  json: {\n    specs: planResp.specs,\n    db_path: body.db_path,\n    schema_text: body.schema_text,\n    user_prompt: body.prompt,\n  },\n}];"
-      },
-      "id": "aaaa1111-0000-0000-0000-000000000001",
-      "name": "Zaplanuj Wykresy",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        512,
-        120
-      ]
-    },
-    {
-      "parameters": {
-        "mode": "runOnceForAllItems",
-        "language": "javaScript",
         "jsCode": "const input = $input.first().json; // {specs, db_path, schema_text, user_prompt}\nconst BACKEND = 'http://fastapi_backend:8000';\nconst OLLAMA = 'http://ollama:11434';\nconst MODEL = 'qwen2.5-coder:7b';\n\nasync function callBackend(path, payload) {\n  return await this.helpers.httpRequest({\n    method: 'POST',\n    url: BACKEND + path,\n    body: payload,\n    json: true,\n  });\n}\n\nasync function callOllama(prompt) {\n  const r = await this.helpers.httpRequest({\n    method: 'POST',\n    url: OLLAMA + '/api/generate',\n    body: { model: MODEL, prompt: prompt, stream: false, format: 'json' },\n    json: true,\n    timeout: 180000,\n  });\n  return JSON.parse(r.response || '{}');\n}\n\nconst charts = [];\nfor (const spec of input.specs) {\n  let sql = '', ok = false, err = '', cols = [], sample = [];\n  for (let attempt = 0; attempt < 3; attempt++) {\n    const sqlPromptResp = await callBackend('/internal/sql-prompt', {\n      goal: spec.goal,\n      chart_type: spec.chart_type || '',\n      schema_text: input.schema_text,\n      prev_sql: sql,\n      prev_err: err,\n    });\n    const rawOut = await callOllama(sqlPromptResp.prompt);\n    const rawSql = (rawOut && rawOut.sql) || '';\n    const validated = await callBackend('/internal/process-sql-attempt', {\n      schema_name: input.db_path,\n      chart_type: spec.chart_type || '',\n      raw_sql: rawSql,\n    });\n    sql = validated.sql;\n    ok = validated.ok;\n    err = validated.error || '';\n    cols = validated.columns;\n    sample = validated.sample;\n    if (ok && sql) break;\n  }\n  if (!ok || !sql) continue;\n  const finalized = await callBackend('/internal/finalize-chart', {\n    title: spec.title,\n    sql: sql,\n    chart_type: spec.chart_type || '',\n    columns: cols,\n    sample: sample,\n    user_prompt: input.user_prompt,\n  });\n  charts.push({ title: finalized.title, sql: sql, display: finalized.display, columns: cols });\n}\n\nconst dateColResp = await this.helpers.httpRequest({\n  method: 'GET',\n  url: BACKEND + '/internal/date-column?schema_name=' + encodeURIComponent(input.db_path),\n  json: true,\n});\n\nreturn [{\n  json: {\n    charts: charts,\n    db_path: input.db_path,\n    user_prompt: input.user_prompt,\n    date_column: dateColResp.date_column || null,\n  },\n}];"
       },
       "id": "bbbb2222-0000-0000-0000-000000000002",
@@ -372,6 +357,148 @@
         768,
         120
       ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const body = $('Webhook').item.json.body;\nconst resp = await this.helpers.httpRequest({\n  method: 'POST',\n  url: 'http://fastapi_backend:8000/internal/plan-prompt',\n  body: {\n    goal: body.prompt,\n    chart_type: body.chart_type || '',\n    description: body.description || '',\n    schema_text: body.schema_text || '',\n  },\n  json: true,\n});\nreturn [{ json: {\n  prompt: resp.prompt,\n  n_charts: resp.n_charts,\n  requested_types: resp.requested_types,\n  db_path: body.db_path,\n  schema_text: body.schema_text,\n  user_prompt: body.prompt,\n} }];"
+      },
+      "id": "cccc3333-0000-0000-0000-000000000003",
+      "name": "Zbuduj Prompt Planu",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        512,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "model": "qwen2.5-coder:7b",
+        "options": {}
+      },
+      "id": "dddd4444-0000-0000-0000-000000000004",
+      "name": "Model Ollama (Plan)",
+      "type": "@n8n/n8n-nodes-langchain.lmOllama",
+      "typeVersion": 1,
+      "position": [
+        512,
+        320
+      ],
+      "credentials": {
+        "ollamaApi": {
+          "id": "MGVoPTb0gY1cUjmf",
+          "name": "Ollama (docker)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.prompt }}",
+        "hasOutputParser": false
+      },
+      "id": "eeee5555-0000-0000-0000-000000000005",
+      "name": "LLM Chain: Plan",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.6,
+      "position": [
+        768,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const chainText = $json.text || '';\nconst cleaned = chainText.replace(/```json/gi, '').replace(/```/g, '').trim();\nlet rawPlan;\ntry {\n  rawPlan = JSON.parse(cleaned);\n} catch (e) {\n  rawPlan = { charts: [] };\n}\n\nconst upstream = $('Zbuduj Prompt Planu').item.json;\n\nconst resp = await this.helpers.httpRequest({\n  method: 'POST',\n  url: 'http://fastapi_backend:8000/internal/process-plan',\n  body: {\n    raw_plan: rawPlan,\n    requested_types: upstream.requested_types,\n    n_charts: upstream.n_charts,\n    user_prompt: upstream.user_prompt,\n    is_retry: false,\n  },\n  json: true,\n});\n\nreturn [{\n  json: {\n    specs: resp.specs,\n    need_retry: resp.need_retry,\n    db_path: upstream.db_path,\n    schema_text: upstream.schema_text,\n    user_prompt: upstream.user_prompt,\n    plan_prompt: upstream.prompt,\n  },\n}];"
+      },
+      "id": "ffff6666-0000-0000-0000-000000000006",
+      "name": "Przetworz Plan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1024,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-retry",
+              "leftValue": "={{ $json.need_retry }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "gggg7777-0000-0000-0000-000000000007",
+      "name": "Trzeba Retry Planu?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1280,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const base = $('Przetworz Plan').item.json;\nconst prompt = base.plan_prompt + \"\\nUWAGA: POPRZEDNI PLAN byl w obcym jezyku. Pola 'title' i 'goal' MUSZA byc napisane WYLACZNIE po polsku.\";\nreturn [{ json: { prompt } }];"
+      },
+      "id": "hhhh8888-0000-0000-0000-000000000008",
+      "name": "Zbuduj Prompt Retry Planu",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1536,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.prompt }}",
+        "hasOutputParser": false
+      },
+      "id": "iiii9999-0000-0000-0000-000000000009",
+      "name": "LLM Chain: Plan Retry",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.6,
+      "position": [
+        1792,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const chainText = $json.text || '';\nconst cleaned = chainText.replace(/```json/gi, '').replace(/```/g, '').trim();\nlet rawPlan;\ntry { rawPlan = JSON.parse(cleaned); } catch (e) { rawPlan = { charts: [] }; }\nconst upstream = $('Przetworz Plan').item.json;\nconst resp = await this.helpers.httpRequest({\n  method: 'POST',\n  url: 'http://fastapi_backend:8000/internal/process-plan',\n  body: {\n    raw_plan: rawPlan,\n    requested_types: [],\n    n_charts: (upstream.specs && upstream.specs.length) || 3,\n    user_prompt: upstream.user_prompt,\n    is_retry: true,\n  },\n  json: true,\n});\nreturn [{ json: {\n  specs: resp.specs,\n  db_path: upstream.db_path,\n  schema_text: upstream.schema_text,\n  user_prompt: upstream.user_prompt,\n} }];"
+      },
+      "id": "jjjjaaaa-0000-0000-0000-00000000000a",
+      "name": "Przetworz Plan Retry",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2048,
+        0
+      ]
     }
   ],
   "connections": {
@@ -379,7 +506,7 @@
       "main": [
         [
           {
-            "node": "Zaplanuj Wykresy",
+            "node": "Zbuduj Prompt Planu",
             "type": "main",
             "index": 0
           }
@@ -547,8 +674,75 @@
         ]
       ]
     },
-    "Zaplanuj Wykresy": {
+    "Generuj SQL i Zbierz Wykresy": {
       "main": [
+        [
+          {
+            "node": "Metabase Login",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zbuduj Prompt Planu": {
+      "main": [
+        [
+          {
+            "node": "LLM Chain: Plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Model Ollama (Plan)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "LLM Chain: Plan",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "LLM Chain: Plan Retry",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM Chain: Plan": {
+      "main": [
+        [
+          {
+            "node": "Przetworz Plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Przetworz Plan": {
+      "main": [
+        [
+          {
+            "node": "Trzeba Retry Planu?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trzeba Retry Planu?": {
+      "main": [
+        [
+          {
+            "node": "Zbuduj Prompt Retry Planu",
+            "type": "main",
+            "index": 0
+          }
+        ],
         [
           {
             "node": "Generuj SQL i Zbierz Wykresy",
@@ -558,11 +752,33 @@
         ]
       ]
     },
-    "Generuj SQL i Zbierz Wykresy": {
+    "Zbuduj Prompt Retry Planu": {
       "main": [
         [
           {
-            "node": "Metabase Login",
+            "node": "LLM Chain: Plan Retry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM Chain: Plan Retry": {
+      "main": [
+        [
+          {
+            "node": "Przetworz Plan Retry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Przetworz Plan Retry": {
+      "main": [
+        [
+          {
+            "node": "Generuj SQL i Zbierz Wykresy",
             "type": "main",
             "index": 0
           }
