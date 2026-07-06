@@ -246,6 +246,70 @@ Cel: `top produkty` → **✦ Ulepsz prompt AI** (+ ew. odpowiedź na pytanie)
 
 ---
 
+## H. olist.sqlite — prawdziwe dane e-commerce (~100 tys. zamówień) — TEST SKALI
+
+> Największa baza w projekcie: 99 441 zamówień z lat 2016-2018 (brazylijski
+> marketplace). Tu sprawdzamy zachowanie na PRAWDZIWYM wolumenie danych.
+> Baza powinna już być wgrana (olist.sqlite na Twoim koncie) — jeśli nie, wgraj.
+> ⚠ Testuj PRZED blokiem G (G wyłącza usługi).
+
+### H1 — Schemat dużej bazy
+Rozwiń **Pokaż tabele i kolumny**:
+- [ ] 9 tabel (orders, order_items, customers, products, sellers, payments,
+      reviews, geolocation, category_translation)
+- [ ] `order_purchase_timestamp` ma typ **timestamp**
+
+### H2 — Prosta agregacja na 100k wierszy
+Cel: `liczba zamówień według statusu`
+- [ ] Sukces; zanotuj czas — czy zauważalnie wolniej niż na małych bazach?
+      (spodziewane: NIE — czas i tak dominuje model, nie SQL)
+
+### H3 — Kategorie po portugalsku + tabela tłumaczeń 🎯 ciekawostka do Ewaluacji
+Cel: `sprzedaż według kategorii produktów`
+- [ ] Sukces; zanotuj: czy model użył tabeli `category_translation` (kategorie
+      po angielsku), czy surowych nazw portugalskich (`cama_mesa_banho`...)?
+      Obie wersje są poprawne — ale która, to materiał o "sprycie" modelu
+
+### H4 — Trend + filtr dat na dużym wolumenie
+Cel: `miesięczny trend wartości zamówień`
+- [ ] Trend po miesiącach (dane 2016-2018), filtr dat obecny
+- [ ] Zawęź filtr do roku 2017 — wykres reaguje poprawnie
+
+### H5 — JOIN przez zamówienia
+Cel: `top 10 miast według liczby zamówień`
+(wymaga orders + customers)
+- [ ] Etykiety = nazwy miast (Sao Paulo, Rio...), sensowne liczby
+
+---
+
+## I. Chinook_Sqlite.sqlite — sklep muzyczny, NAJDŁUŻSZY łańcuch JOIN-ów
+
+> Klasyczna baza-benchmark. Faktury 2009-2013. Test I2 to najgłębszy JOIN
+> w całym planie (5 tabel) — porażka jest tu cennym wynikiem, nie wstydem.
+> ⚠ Testuj PRZED blokiem G.
+
+### I1 — Kontrola: prosty JOIN dwóch tabel
+Cel: `liczba utworów według gatunku muzycznego`
+(track + genre)
+- [ ] Etykiety = nazwy gatunków (Rock, Jazz...), nie genreid
+
+### I2 — Łańcuch 5 tabel ⭐ najtrudniejszy JOIN całego planu
+Cel: `top 10 artystów według przychodów ze sprzedaży`
+(invoiceline → track → album → artist + invoice)
+- [ ] Zanotuj: sukces/porażka, liczba auto-korekt, czy etykiety to NAZWY artystów
+- [ ] Porażka = zanotuj CO wyszło (to jest wynik do Ewaluacji, jak E1)
+
+### I3 — Trend + filtr dat
+Cel: `miesięczny przychód z faktur`
+- [ ] Trend po miesiącach (dane 2009-2013!), filtr dat obecny i działa
+
+### I4 — Agregacja z JOIN + grupowanie po kraju
+Cel: `przychody według kraju klienta`
+(invoice + customer)
+- [ ] Kraje jako etykiety, kwoty sensowne (USA największe)
+
+---
+
 ## Co notować przy każdym teście
 1. Liczba **auto-korekt SQL** (pasek nad dashboardem) — do statystyk Ewaluacji
 2. Czas generacji "na oko" (szybko / ~1 min / długo)
