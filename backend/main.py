@@ -1344,7 +1344,15 @@ def _generate_via_n8n_orchestrator(g, db, db_id):
     }
     r = http.post(N8N_ORCHESTRATOR_URL, json=payload, timeout=max(g.n8n_timeout, 300))
     r.raise_for_status()
-    data = r.json()
+    try:
+        data = r.json()
+    except ValueError:
+        # n8n zwraca pusta/nie-JSON odpowiedz gdy workflow przerwie sie PRZED wezlem
+        # "Odpowiedz" (np. Ollama albo Metabase nie dziala) — bez tego user widzial
+        # kryptyczne "Expecting value: line 1 column 1 (char 0)" (test G1/G4).
+        raise Exception(
+            "generowanie przerwane w trakcie — najczesciej Ollama albo Metabase "
+            "nie odpowiada. Sprawdz uslugi (docker compose ps) i sprobuj ponownie.")
     dash_url = data.get("url")
     if not dash_url:
         raise Exception(f"n8n orchestrator nie zwrocil url dashboardu: {data}")
