@@ -54,3 +54,4 @@ screeny z testu n8n/
 tests/.pytest_cache/
 __pycache__/
 eval_results_*.csv
+golden_set_results_*.csv

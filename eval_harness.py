@@ -129,11 +129,12 @@ def _run_prompt(token, db_path, schema_text, prompt):
             "retries": data.get("retry_count"),
             "url": (data.get("metabase") or {}).get("url", ""),
             "error": (data.get("error") or "")[:200],
+            "sql": data.get("sql", ""),  # uzywane przez golden_set.py, nie trafia do CSV
         }
     except Exception as e:
         return {"status": "exception", "elapsed_s": round(time.monotonic() - t0, 1),
                 "requested": None, "generated": None, "failed": None,
-                "retries": None, "url": "", "error": str(e)[:200]}
+                "retries": None, "url": "", "error": str(e)[:200], "sql": ""}
 
 
 def main():
@@ -184,7 +185,7 @@ def main():
               + (f", BLAD: {row['error']}" if row["error"] else ""), flush=True)
 
     with open(csv_path, "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=fields)
+        w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
         w.writeheader()
         w.writerows(results)
 
