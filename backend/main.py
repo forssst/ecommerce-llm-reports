@@ -1046,6 +1046,11 @@ def enhance_prompt(body: EnhanceIn, _: int = Depends(verify_token)):
 
 @app.post("/describe-schema")
 def describe_schema(body: DescribeIn, _: int = Depends(verify_token)):
+    # Pusty schemat = baza usunieta/nieistniejaca — bez tego guardu model dostawal
+    # pusty prompt i odpowiadal "nie moge opisac bazy, ktorej nie podano".
+    if not (body.schema_text or "").strip():
+        raise HTTPException(status_code=400,
+                            detail="Brak schematu bazy — odśwież listę baz (baza mogła zostać usunięta).")
     prompt = PROMPTS["describe_schema"].format(schema_text=body.schema_text)
     try:
         r = http.post(f"{OLLAMA_URL}/api/generate",
@@ -1224,6 +1229,15 @@ async def upload_database(user_id: int = Form(...), file: UploadFile = File(...)
 
     schema = get_db_schema(schema_name)
     compact_schema = {t: [c["name"] for c in info["columns"]] for t, info in schema.items()}
+    # Ponowny upload tego samego pliku NADPISUJE istniejacy wpis zamiast tworzyc duplikat.
+    # Duble wskazywaly na TEN SAM schemat Postgresa, wiec usuniecie jednego z nich
+    # kasowalo dane drugiemu (zaobserwowane: firma_uslugi x2, sakila x2).
+    rec = db.query(models.Database).filter_by(user_id=user_id, file_path=schema_name).first()
+    if rec:
+        rec.name = orig_name
+        rec.schema_json = compact_schema
+        db.commit(); db.refresh(rec)
+        return {"id": rec.id, "name": rec.name, "message": "Baza zaktualizowana (nadpisano poprzednią wersję)."}
     rec = models.Database(user_id=user_id, name=orig_name,
                           file_path=schema_name, schema_json=compact_schema)
     db.add(rec); db.commit(); db.refresh(rec)
