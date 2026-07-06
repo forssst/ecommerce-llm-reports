@@ -1309,11 +1309,13 @@ def _generate_via_n8n_orchestrator(g, db, db_id):
     if not dash_url:
         raise Exception(f"n8n orchestrator nie zwrocil url dashboardu: {data}")
     sql_text = data.get("sql", "")
+    retries = int(data.get("retries") or 0)
     rec = models.Query(user_id=g.user_id, database_id=db_id, prompt_nl=_full_prompt(g),
                        generated_sql=json.dumps({"dashboard_url": dash_url}, ensure_ascii=False),
-                       status="success", retry_count=0)
+                       status="success", retry_count=retries)
     db.add(rec); db.commit()
     return {"status": "success", "metabase": {"url": dash_url}, "sql": sql_text,
+            "retry_count": retries,
             "chart_summary": {"requested": data.get("requested"), "generated": data.get("generated"),
                               "failed": data.get("failed"), "failed_titles": data.get("failed_titles") or []}}
 
