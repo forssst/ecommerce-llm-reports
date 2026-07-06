@@ -93,16 +93,57 @@ PG_PORT = int(os.getenv("PG_PORT", "5432"))
 PG_DB   = os.getenv("PG_DB", "analytics")
 PG_USER = os.getenv("PG_USER", "analyst")
 PG_PASS = os.getenv("PG_PASS", "analyst")
+# Rola tylko-do-odczytu: wykonuje SQL wygenerowany przez LLM (walidacja + karty Metabase).
+# LLM moglby wygenerowac destrukcyjny SQL (DROP/DELETE) — ta rola fizycznie mu to uniemozliwia.
+PG_RO_USER = os.getenv("PG_RO_USER", "readonly")
+PG_RO_PASS = os.getenv("PG_RO_PASS", "readonly")
 
 
-def _pg_conn(schema: str = None):
+def _pg_conn(schema: str = None, readonly: bool = False):
+    user, password = (PG_RO_USER, PG_RO_PASS) if readonly else (PG_USER, PG_PASS)
     conn = psycopg2.connect(host=PG_HOST, port=PG_PORT, dbname=PG_DB,
-                            user=PG_USER, password=PG_PASS)
+                            user=user, password=password)
     if schema:
         with conn.cursor() as cur:
             cur.execute(pgsql.SQL("SET search_path TO {},public").format(
                 pgsql.Identifier(schema)))
     return conn
+
+
+def _ensure_readonly_role():
+    """Tworzy (idempotentnie) role read-only przy starcie backendu, zeby dzialala
+    tez na swiezym klonie bez recznej migracji. 'analyst' jest wlascicielem bazy
+    (POSTGRES_USER z compose), wiec moze tworzyc role i nadawac uprawnienia."""
+    try:
+        conn = _pg_conn()
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (PG_RO_USER,))
+            if not cur.fetchone():
+                cur.execute(pgsql.SQL("CREATE ROLE {} LOGIN PASSWORD %s").format(
+                    pgsql.Identifier(PG_RO_USER)), (PG_RO_PASS,))
+            cur.execute(pgsql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(
+                pgsql.Identifier(PG_DB), pgsql.Identifier(PG_RO_USER)))
+            # Nowe tabele tworzone przez analyst (przyszle uploady) dostana SELECT automatycznie.
+            cur.execute(pgsql.SQL(
+                "ALTER DEFAULT PRIVILEGES FOR ROLE {} GRANT SELECT ON TABLES TO {}").format(
+                pgsql.Identifier(PG_USER), pgsql.Identifier(PG_RO_USER)))
+            # Istniejace schematy uzytkownikow (u{id}_...) + public: USAGE i SELECT.
+            cur.execute("SELECT schema_name FROM information_schema.schemata "
+                        "WHERE schema_name = 'public' OR schema_name ~ '^u[0-9]+_'")
+            for (sname,) in cur.fetchall():
+                cur.execute(pgsql.SQL("GRANT USAGE ON SCHEMA {} TO {}").format(
+                    pgsql.Identifier(sname), pgsql.Identifier(PG_RO_USER)))
+                cur.execute(pgsql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {}").format(
+                    pgsql.Identifier(sname), pgsql.Identifier(PG_RO_USER)))
+        conn.close()
+    except Exception as e:
+        # Brak roli nie moze polozyc calego backendu — ale walidacja SQL przestanie
+        # dzialac, wiec zaloguj wyraznie.
+        print(f"[readonly-role ERROR] nie udalo sie zapewnic roli read-only: {e}")
+
+
+_ensure_readonly_role()
 
 
 def _sanitize_schema(user_id: int, filename: str) -> str:
@@ -444,7 +485,9 @@ def _run_and_validate(schema_name, sql, chart_type=None):
     if not schema_name:
         return True, None, [], []
     try:
-        conn = _pg_conn(schema_name)
+        # SQL pochodzi od LLM — wykonuj rola read-only, zeby DROP/DELETE/UPDATE
+        # fizycznie nie mogly przejsc (obrona na poziomie uprawnien, nie parsowania).
+        conn = _pg_conn(schema_name, readonly=True)
         with conn.cursor() as cur:
             cur.execute(sql)
             cols = [d[0] for d in cur.description] if cur.description else []
@@ -550,8 +593,9 @@ def _ensure_metabase_db(token: str, schema_name: str) -> int:
             "host": PG_HOST,
             "port": PG_PORT,
             "dbname": PG_DB,
-            "user": PG_USER,
-            "password": PG_PASS,
+            # Metabase wykonuje SQL kart (wygenerowany przez LLM) — tez rola read-only.
+            "user": PG_RO_USER,
+            "password": PG_RO_PASS,
             "ssl": False,
             "additional-options": f"currentSchema={schema_name}",
         },
@@ -976,6 +1020,15 @@ def enhance_prompt(body: EnhanceIn, _: int = Depends(verify_token)):
         if not re.search(r'\d', body.prompt) and re.search(r'(?i)\btop\s+\d+\b', enhanced):
             enhanced = re.sub(r'(?i)\btop\s+\d+\b', 'TOP', enhanced)
 
+        # Odwrotny przypadek: user PODAŁ limit przy "top" (np. "TOP 10"), a model go zgubił
+        # przy przepisywaniu (obserwowane w teście F4 — enhance zamienił "TOP 10 produktów..."
+        # na opisowy tekst bez limitu, co dało SQL bez LIMIT i nieczytelny wykres z ~40 słupkami).
+        # UWAGA: sprawdzamy konkretnie liczbę z "top N", nie dowolną liczbę w prompcie — inna
+        # liczba (np. rok "2024") mogłaby przetrwać i fałszywie zamaskować zgubiony limit.
+        top_match = re.search(r'(?i)\btop\s+(\d+)\b', body.prompt)
+        if top_match and top_match.group(1) not in enhanced:
+            enhanced = f"{enhanced.rstrip('.')}. Zachowaj limit: TOP {top_match.group(1)}."
+
         # Model czasem ignoruje doprecyzowanie mimo instrukcji w prompcie (silny prior 7B).
         # Porównujemy po rdzeniach słów (pierwsze 5 znaków — radzi sobie z polską odmianą,
         # np. 'miesięcznym' vs 'miesięczny'); jeśli nic z odpowiedzi użytkownika nie trafiło
@@ -997,7 +1050,7 @@ def describe_schema(body: DescribeIn, _: int = Depends(verify_token)):
     try:
         r = http.post(f"{OLLAMA_URL}/api/generate",
                       json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
-                      timeout=300)
+                      timeout=600)
         r.raise_for_status()
         desc = (r.json().get("response") or "").strip()
         if not desc:
@@ -1127,6 +1180,8 @@ async def upload_database(user_id: int = Form(...), file: UploadFile = File(...)
     with engine.connect() as conn:
         conn.execute(sa_text(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE'))
         conn.execute(sa_text(f'CREATE SCHEMA "{schema_name}"'))
+        # Rola read-only musi widziec nowy schemat (SELECT na tabelach da default privileges).
+        conn.execute(sa_text(f'GRANT USAGE ON SCHEMA "{schema_name}" TO {PG_RO_USER}'))
         conn.commit()
     for tname, df in dfs.items():
         safe_tname = re.sub(r"[^\w]", "_", tname).strip("_").lower() or "data"
@@ -1253,11 +1308,14 @@ def _generate_via_n8n_orchestrator(g, db, db_id):
     dash_url = data.get("url")
     if not dash_url:
         raise Exception(f"n8n orchestrator nie zwrocil url dashboardu: {data}")
+    sql_text = data.get("sql", "")
     rec = models.Query(user_id=g.user_id, database_id=db_id, prompt_nl=_full_prompt(g),
                        generated_sql=json.dumps({"dashboard_url": dash_url}, ensure_ascii=False),
                        status="success", retry_count=0)
     db.add(rec); db.commit()
-    return {"status": "success", "metabase": {"url": dash_url}}
+    return {"status": "success", "metabase": {"url": dash_url}, "sql": sql_text,
+            "chart_summary": {"requested": data.get("requested"), "generated": data.get("generated"),
+                              "failed": data.get("failed"), "failed_titles": data.get("failed_titles") or []}}
 
 
 @app.post("/generate")
@@ -1373,6 +1431,7 @@ class InternalProcessSqlIn(BaseModel):
     schema_name: str
     chart_type: str = ""
     raw_sql: str
+    goal: str = ""
 
 
 @app.post("/internal/process-sql-attempt")
@@ -1385,7 +1444,22 @@ def internal_process_sql_attempt(body: InternalProcessSqlIn):
                           "wynik, bo dane moga byc z innego okresu niz biezaca data serwera. Usun ten "
                           "filtr calkowicie i pokaz PELNY zakres dat z tabeli, bez WHERE na kolumnie daty."),
                 "columns": [], "sample": []}
+    # Guard: cel wykresu obiecuje "TOP N", a model zgubil LIMIT w SQL (obserwowane w tescie F4:
+    # ~40 slupkow zamiast 10). Deterministyczna naprawa zamiast retry — doklejenie LIMIT jest
+    # bezpieczne skladniowo na koncu zapytania bez LIMIT.
+    top_match = re.search(r'(?i)\btop\s+(\d+)\b', body.goal or "")
+    if top_match and not re.search(r'(?i)\bLIMIT\b', sql):
+        sql = f"{sql.rstrip().rstrip(';')} LIMIT {top_match.group(1)}"
     ok, verr, cols, sample = _run_and_validate(body.schema_name, sql, ctype)
+    # Guard: SQL poprawny, ale 0 wierszy = bezuzyteczna karta w Metabase ("No results!").
+    # Traktuj jako blad walidacji -> retry z podpowiedzia; po wyczerpaniu prob wykres
+    # zostanie pominiety i pokazany w ostrzezeniu (zamiast pustej karty).
+    if ok and not sample:
+        return {"ok": False, "sql": sql,
+                "error": ("Zapytanie wykonalo sie poprawnie, ale zwrocilo 0 wierszy. Sprawdz warunki "
+                          "WHERE (np. zakres dat moze nie wystepowac w danych albo JOIN laczy puste "
+                          "tabele) i napisz zapytanie tak, zeby zwracalo istniejace dane."),
+                "columns": cols, "sample": []}
     return {"ok": ok, "sql": sql, "error": verr, "columns": cols, "sample": sample}
 
 

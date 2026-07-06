@@ -6,12 +6,11 @@ Poprawnie: połączenie do danych powinno być READ-ONLY (osobny użytkownik Pos
 z prawami tylko SELECT), więc DROP/DELETE/UPDATE się nie wykona.
 
 To test na poziomie WARSTWY DANYCH, nie modelu — nie zależy od tego, co akurat
-wygeneruje LLM. Uderzamy bezpośrednio w tę samą funkcję walidacji SQL, której używa
-generacja (_run_and_validate), przez cienki import backendu.
+wygeneruje LLM. Łączymy się TĄ SAMĄ rolą read-only, której backend używa do
+wykonywania SQL-a od LLM (_run_and_validate, karty Metabase) i próbujemy DDL.
 
-UWAGA: obecnie backend łączy się do Postgresa użytkownikiem 'analyst' z pełnymi
-prawami (patrz PG_USER w main.py) → DDL/DML PRZECHODZI. xfail dokumentuje tę lukę.
-Fix: read-only role w Postgresie + użycie jej do wykonywania SQL wykresów.
+Naprawione 2026-07-06: backend tworzy rolę 'readonly' przy starcie
+(_ensure_readonly_role) i wykonuje nią cały SQL pochodzący od modelu.
 """
 import os
 import uuid
@@ -27,8 +26,9 @@ PG = dict(
     host=os.getenv("PG_HOST", "localhost"),
     port=int(os.getenv("PG_PORT", "5432")),
     dbname=os.getenv("PG_DB", "analytics"),
-    user=os.getenv("PG_USER", "analyst"),
-    password=os.getenv("PG_PASS", "analyst"),
+    # Ta sama rola, którą backend wykonuje SQL wygenerowany przez LLM.
+    user=os.getenv("PG_RO_USER", "readonly"),
+    password=os.getenv("PG_RO_PASS", "readonly"),
 )
 
 
@@ -49,8 +49,6 @@ def test_polaczenie_czyta_dane():
     conn.close()
 
 
-@pytest.mark.xfail(reason="połączenie do danych NIE jest read-only — DDL przechodzi",
-                   strict=False)
 def test_drop_table_powinien_byc_zablokowany():
     """Próba utworzenia i usunięcia tabeli powinna zostać odrzucona przez uprawnienia
     (read-only role). Jeśli przechodzi — LLM mógłby wygenerować destrukcyjny SQL."""

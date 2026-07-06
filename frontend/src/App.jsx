@@ -579,6 +579,14 @@ export default function App() {
                             <span className="text-gray-400 font-normal"> · {result.retry_count} auto-korekta SQL</span>
                           )}
                         </span>
+                        {result.chart_summary?.failed > 0 && (
+                          <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
+                            ⚠ {result.chart_summary.failed} z {result.chart_summary.requested} wykresów nie przeszło walidacji
+                            {result.chart_summary.failed_titles?.length > 0 && (
+                              <> ({result.chart_summary.failed_titles.join(", ")})</>
+                            )}
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-3">
                         <a href={result.metabase?.url} target="_blank" rel="noopener noreferrer"
