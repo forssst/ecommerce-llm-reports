@@ -5,6 +5,27 @@
 > 2) **podwaliny pod rozdziały pracy inżynierskiej** (mapowanie na końcu),
 > 3) **dokumentacja operacyjna** (jak uruchomić, debugować, mierzyć).
 
+## 📚 Seria szczegółowa `docs/` (deep dive — czytaj PO tym przeglądzie)
+
+Ten plik to WARSTWA PRZEGLĄDOWA. Pełne wejście w szczegóły (kod linia po linii,
+przykłady żądań/odpowiedzi, treści promptów z adnotacjami, wyniki per prompt):
+
+| Plik | Zakres |
+|---|---|
+| [docs/01-architektura-i-dane.md](docs/01-architektura-i-dane.md) | usługi z konfiguracją, zmienne env, DDL modeli, role Postgresa, sieć i granice zaufania |
+| [docs/02-backend-auth-i-api.md](docs/02-backend-auth-i-api.md) | anatomia JWT/bcrypt, KAŻDY endpoint publiczny z przykładami JSON, konwencje błędów |
+| [docs/03-upload-pipeline.md](docs/03-upload-pipeline.md) | upload krok po kroku per format, detekcja dat, upsert, edge case'y |
+| [docs/04-prompty.md](docs/04-prompty.md) | wszystkie szablony z adnotacją każdej reguły [→ z jakiego buga], hinty typów wykresów |
+| [docs/05-generowanie-n8n.md](docs/05-generowanie-n8n.md) | workflow węzeł po węźle z kodem JS, kontrakty `/internal`, edycja przez API, pułapka activeVersionId |
+| [docs/06-walidacja-i-guardy.md](docs/06-walidacja-i-guardy.md) | `_clean_sql` operacja po operacji, wszystkie guardy z przykładami we/wy, mapa „który guard gdzie mieszka" |
+| [docs/07-metabase.md](docs/07-metabase.md) | sesja, źródła, karty, viz-settings per typ, filtr dat end-to-end, pułapka MBQL stages |
+| [docs/08-frontend.md](docs/08-frontend.md) | pełna mapa stanu, przepływy UI, kontrakty frontend↔backend |
+| [docs/09-testy-i-ewaluacja.md](docs/09-testy-i-ewaluacja.md) | 4 poziomy testów + PEŁNE wyniki per prompt (harness/golden/stress) |
+| [docs/10-bezpieczenstwo.md](docs/10-bezpieczenstwo.md) | model zagrożeń, 4 luki jako studia przypadku, defense-in-depth, otwarta lista |
+
+Każdy plik serii kończy się sekcją „Sprawdź się" — razem ~50 pytań kontrolnych
+na jutrzejszą naukę.
+
 ---
 
 ## Spis treści
