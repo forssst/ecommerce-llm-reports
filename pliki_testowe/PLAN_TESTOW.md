@@ -175,10 +175,12 @@ Spróbuj wgrać plik `.txt` albo `.pdf`
 - [x] Czytelny komunikat błędu (nie crash / biały ekran)
 
 ### F4 — Jasny cel = brak pytania
+Baza: **sklep_testowy.csv** (dane z 2024 — na innych bazach rok 2024 może być pusty!)
 Cel: `TOP 10 produktów według sumy sprzedaży z podziałem miesięcznym w 2024 roku` → **✦ Ulepsz prompt AI**
 - [x] NIE zadaje pytania (cel jest kompletny) — od razu ulepsza
 
 ### F5 — "top" bez liczby
+Baza: **sklep_testowy.csv**
 Cel: `top produkty` → **✦ Ulepsz prompt AI** (+ ew. odpowiedź na pytanie)
 - [x] Ulepszony prompt NIE zawiera wymyślonej liczby ("TOP 10"/"TOP 20")
 

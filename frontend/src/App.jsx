@@ -154,25 +154,30 @@ export default function App() {
 
     setIsEnhancing(true);
     try {
-      // Krok 1: wygeneruj świeży opis bazy — pojawia się w polu tekstowym
-      setIsGeneratingDesc(true);
-      setDescription("");
-      let freshDescription = "";
-      try {
-        const descRes = await fetch(`${API_URL}/describe-schema`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...authHeaders() },
-          body: JSON.stringify({ schema_text: schemaText }),
-        });
-        const descData = await descRes.json();
-        if (!descRes.ok) {
-          setDescription("⚠ Nie udało się wygenerować opisu (model zbyt wolny). Kliknij 'Generuj opis AI' ręcznie lub poczekaj.");
-        } else {
-          freshDescription = descData.description || "";
-          setDescription(freshDescription);
+      // Krok 1: użyj ISTNIEJĄCEGO opisu, jeśli pole jest już wypełnione (np. user
+      // kliknął wcześniej "Generuj opis AI") — generuj świeży tylko gdy pusto.
+      // Bez tego każde "Ulepsz prompt" czekało drugi raz na model (~1-2 min).
+      let freshDescription = (description || "").trim();
+      if (!freshDescription || freshDescription.startsWith("⚠")) {
+        setIsGeneratingDesc(true);
+        setDescription("");
+        freshDescription = "";
+        try {
+          const descRes = await fetch(`${API_URL}/describe-schema`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...authHeaders() },
+            body: JSON.stringify({ schema_text: schemaText }),
+          });
+          const descData = await descRes.json();
+          if (!descRes.ok) {
+            setDescription("⚠ Nie udało się wygenerować opisu (model zbyt wolny). Kliknij 'Generuj opis AI' ręcznie lub poczekaj.");
+          } else {
+            freshDescription = descData.description || "";
+            setDescription(freshDescription);
+          }
+        } finally {
+          setIsGeneratingDesc(false);
         }
-      } finally {
-        setIsGeneratingDesc(false);
       }
 
       // Ulepsz prompt używając opisu + schematu + (opcjonalnie) doprecyzowania

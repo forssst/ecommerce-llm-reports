@@ -1111,7 +1111,7 @@ def update_prompts(body: PromptsIn, _: int = Depends(verify_token)):
     return {"ok": True, "prompts": PROMPTS}
 
 
-MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB (northwind.db z pliki_testowe ma ~24MB)
+MAX_UPLOAD_BYTES = 150 * 1024 * 1024  # 150 MB (olist.sqlite z testow ma ~111MB)
 
 
 @app.post("/upload")
@@ -1291,13 +1291,53 @@ def get_user_queries(user_id: int, db: Session = Depends(database.get_db),
 N8N_ORCHESTRATOR_URL = os.getenv("N8N_ORCHESTRATOR_URL", "http://n8n_local:5678/webhook/create-dashboard")
 
 
+_TEXT_VALUES_MAX_DISTINCT = 8
+
+
+def _text_column_values(schema_name: str) -> str:
+    """Fragment promptu ze znanymi WARTOSCIAMI kolumn tekstowych o niskiej
+    kardynalnosci (np. status umowy, kategoria, rating). Model zna tylko NAZWY
+    kolumn i wymysla wartosci w WHERE — obserwowane w tescie B4: model napisal
+    WHERE status='podpisana', a realne wartosci to zakończona/w trakcie/anulowana
+    -> 0 wierszy -> wykres odpadal. Probka 500 wierszy per kolumna (tanio nawet
+    na duzych bazach), tylko kolumny z 2-8 wartosciami."""
+    try:
+        conn = _pg_conn(readonly=True)
+        lines = []
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT table_name, column_name FROM information_schema.columns "
+                "WHERE table_schema = %s AND data_type = 'text' "
+                "ORDER BY table_name, ordinal_position", (schema_name,))
+            cols = cur.fetchall()
+            for t, c in cols:
+                if len(lines) >= 12:
+                    break
+                cur.execute(pgsql.SQL(
+                    "SELECT DISTINCT {c} FROM (SELECT {c} FROM {s}.{t} "
+                    "WHERE {c} IS NOT NULL LIMIT 500) sub LIMIT %s").format(
+                    c=pgsql.Identifier(c), s=pgsql.Identifier(schema_name),
+                    t=pgsql.Identifier(t)), (_TEXT_VALUES_MAX_DISTINCT + 1,))
+                vals = [str(r[0]) for r in cur.fetchall()]
+                if 2 <= len(vals) <= _TEXT_VALUES_MAX_DISTINCT and all(len(v) <= 40 for v in vals):
+                    lines.append(f"- {t}.{c}: " + ", ".join(f"'{v}'" for v in sorted(vals)))
+        conn.close()
+        if not lines:
+            return ""
+        return ("\n\nZnane wartosci kolumn tekstowych (w WHERE uzywaj WYLACZNIE tych "
+                "dokladnych wartosci, NIE wymyslaj innych):\n" + "\n".join(lines))
+    except Exception as e:
+        print(f"[text-values WARN] {e}")
+        return ""
+
+
 def _generate_via_n8n_orchestrator(g, db, db_id):
     """Eksperyment 'n8n jako orchestrator' (patrz plan resilient-prancing-bentley):
     n8n prowadzi caly control-flow plan+SQL+walidacja+Metabase, wolajac cienkie
     endpointy /internal/... zamiast duplikowac logike z _generate_multichart."""
     payload = {
         "prompt": g.prompt,
-        "schema_text": g.schema_text,
+        "schema_text": g.schema_text + _text_column_values(g.db_path),
         "chart_type": g.chart_type,
         "description": g.description,
         "db_path": g.db_path,
@@ -1457,11 +1497,15 @@ def internal_process_sql_attempt(body: InternalProcessSqlIn):
     # Traktuj jako blad walidacji -> retry z podpowiedzia; po wyczerpaniu prob wykres
     # zostanie pominiety i pokazany w ostrzezeniu (zamiast pustej karty).
     if ok and not sample:
-        return {"ok": False, "sql": sql,
-                "error": ("Zapytanie wykonalo sie poprawnie, ale zwrocilo 0 wierszy. Sprawdz warunki "
-                          "WHERE (np. zakres dat moze nie wystepowac w danych albo JOIN laczy puste "
-                          "tabele) i napisz zapytanie tak, zeby zwracalo istniejace dane."),
-                "columns": cols, "sample": []}
+        ok, verr = False, ("Zapytanie wykonalo sie poprawnie, ale zwrocilo 0 wierszy. Sprawdz warunki "
+                           "WHERE (np. zakres dat moze nie wystepowac w danych albo JOIN laczy puste "
+                           "tabele) i napisz zapytanie tak, zeby zwracalo istniejace dane.")
+        sample = []
+    if not ok:
+        # Slad diagnostyczny: bez tego nie widac w logach, DLACZEGO wykres odpada
+        # (n8n dostaje blad w odpowiedzi, ale nie zapisuje prob posrednich).
+        print(f"[sql-attempt FAIL] schema={body.schema_name} chart={ctype} "
+              f"err={str(verr)[:220]} sql={sql[:220]}")
     return {"ok": ok, "sql": sql, "error": verr, "columns": cols, "sample": sample}
 
 
