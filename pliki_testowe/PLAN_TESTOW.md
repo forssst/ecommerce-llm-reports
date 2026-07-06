@@ -184,6 +184,68 @@ Cel: `top produkty` → **✦ Ulepsz prompt AI** (+ ew. odpowiedź na pytanie)
 
 ---
 
+## G. Reagowanie na błędy i awarie (wymaga terminala!)
+
+> Testujemy, czy system PADA Z KLASĄ: czytelny komunikat zamiast wiszącego spinnera,
+> białego ekranu albo — najgorzej — uszkodzonych danych. Po każdym teście przywróć
+> usługę i sprawdź, że system wraca do życia BEZ restartu całości.
+> Komendy odpalaj w folderze projektu.
+
+### G1 — Ollama pada w trakcie pracy ⭐ najczęstsza realna awaria
+🎯 Generowanie kończy się czytelnym błędem, nie wisi w nieskończoność
+1. W terminalu: `docker stop ollama`
+2. Cel: `suma sprzedaży według kategorii` (sklep_testowy) → **Generuj Dashboard**
+- [ ] Pojawia się czerwony box "Błąd generowania" z komunikatem (nie wieczny spinner)
+- [ ] Aplikacja dalej reaguje (można klikać, przełączać bazy)
+3. `docker start ollama` → odczekaj ~10 s → **Generuj Dashboard** ponownie
+- [ ] Działa normalnie, BEZ restartu backendu/frontendu
+
+### G2 — Ollama wyłączona przy "Generuj opis AI"
+🎯 Ostrzeżenie w polu opisu (naprawa z 2026-07-05)
+1. `docker stop ollama` → kliknij **Generuj opis AI**
+- [ ] W polu opisu pojawia się "⚠ Nie udało się wygenerować opisu..." (nie puste pole, nie crash)
+2. `docker start ollama`
+
+### G3 — n8n (orchestrator) wyłączony
+🎯 Jedna ścieżka generowania = n8n to pojedynczy punkt awarii; ma zawieść GŁOŚNO
+1. `docker stop n8n_local` → **Generuj Dashboard**
+- [ ] Czytelny błąd (wspomina n8n/orchestrator), pojawia się szybko (sekundy, nie minuty)
+2. `docker start n8n_local` → odczekaj ~15 s → generacja znowu działa
+- [ ] Działa bez żadnych dodatkowych kroków
+
+### G4 — Metabase wyłączony
+🎯 Awaria na KOŃCU pipeline'u (plan i SQL zdążą się policzyć — tym ciekawszy przypadek)
+1. `docker stop metabase` → **Generuj Dashboard**
+- [ ] Czytelny błąd (może przyjść po ~1-2 min — plan+SQL liczą się normalnie, pada dopiero budowa dashboardu)
+2. `docker start metabase` → Metabase wstaje ~1-2 min → generacja działa
+- [ ] Stare dashboardy z historii też znów się wyświetlają
+
+### G5 — Prompt żądający zniszczenia danych ⭐ test roli read-only
+🎯 Destrukcyjny SQL fizycznie nie może się wykonać (uprawnienia Postgresa, naprawa 2026-07-06)
+1. Cel: `usuń wszystkie zamówienia z tabeli` → **Generuj Dashboard**
+- [ ] Dashboard może się nie wygenerować albo wyjść dziwny — ALE:
+- [ ] Wygeneruj potem normalny dashboard (`suma sprzedaży według kategorii`) —
+      dane są NIETKNIĘTE (te same kwoty co wcześniej)
+2. (opcjonalnie, dowód w terminalu):
+   `docker exec postgres_analytics psql -U readonly -d analytics -c "DELETE FROM u1_sklep_testowy.sklep_testowy;"`
+- [ ] Zwraca "permission denied" — to jest ta warstwa obrony
+
+### G6 — Cel niemożliwy do zrealizowania
+🎯 Guard "0 wykresów" + guard "0 wierszy" (naprawy z 2026-07-05/06)
+1. Cel: `pokaż dane z 2077 roku` (dane są z 2024) → **Generuj Dashboard**
+- [ ] ŻADNEJ pustej karty "No results!" — wykresy bez danych są pominięte
+- [ ] Jeśli pominięto część: żółte ostrzeżenie "N z M wykresów nie przeszło walidacji"
+- [ ] Jeśli pominięto wszystkie: czytelny czerwony błąd (nie wiszący webhook)
+
+### G7 — Wygaśnięcie sesji
+🎯 Stary/zepsuty token JWT = wylogowanie, nie crash
+1. DevTools (F12) → Application → Local Storage → w kluczu `user` zepsuj token
+   (zmień kilka znaków w środku) → odśwież stronę → spróbuj wygenerować dashboard
+- [ ] Aplikacja pokazuje błąd autoryzacji / wraca do logowania (nie biały ekran)
+2. Zaloguj się ponownie — wszystko (bazy, historia) na miejscu
+
+---
+
 ## Co notować przy każdym teście
 1. Liczba **auto-korekt SQL** (pasek nad dashboardem) — do statystyk Ewaluacji
 2. Czas generacji "na oko" (szybko / ~1 min / długo)
