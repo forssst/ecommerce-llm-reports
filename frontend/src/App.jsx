@@ -105,7 +105,9 @@ export default function App() {
       });
       const data = await res.json();
       if (!res.ok) {
-        setDescription("⚠ Nie udało się wygenerować opisu (model zbyt wolny lub błąd). Kliknij 'Generuj opis AI' ponownie.");
+        // Pokaż konkretny powód z backendu (np. "Brak schematu bazy"), jeśli jest —
+        // ogólny komunikat o wolnym modelu mylił, gdy przyczyna była inna.
+        setDescription(`⚠ ${data.detail || "Nie udało się wygenerować opisu (model zbyt wolny lub błąd). Kliknij 'Generuj opis AI' ponownie."}`);
       } else {
         setDescription(data.description || "");
       }
