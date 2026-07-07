@@ -2,6 +2,17 @@
   "name": "Metabase - Utwórz Dashboard",
   "nodes": [
     {
+      "parameters": {},
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        560,
+        448
+      ],
+      "typeVersion": 1,
+      "id": "decea5d3-9861-454a-ab1a-e94e5acb7ab0",
+      "name": "Sticky Note"
+    },
+    {
       "parameters": {
         "httpMethod": "POST",
         "path": "create-dashboard",
@@ -119,7 +130,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({engine: 'postgres', name: $json.db_name, details: {host: 'postgres', port: 5432, dbname: 'analytics', user: 'analyst', password: 'analyst', ssl: false, 'additional-options': 'currentSchema=' + $json.db_name}, is_full_sync: true}) }}",
+        "jsonBody": "={{ JSON.stringify({engine: 'postgres', name: $json.db_name, details: {host: 'postgres', port: 5432, dbname: 'analytics', user: 'readonly', password: 'readonly', ssl: false, 'additional-options': 'currentSchema=' + $json.db_name}, is_full_sync: true}) }}",
         "options": {}
       },
       "id": "c552c349-8541-45f3-a312-3e2ef30be048",
@@ -320,7 +331,7 @@
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ (() => { const g = $('Generuj SQL i Zbierz Wykresy').first().json; const sqlText = (g.charts || []).map(c => '-- ' + c.title + '\\n' + c.sql).join('\\n\\n'); return JSON.stringify({ url: 'http://localhost:3000/public/dashboard/' + $json.uuid, sql: sqlText, requested: g.requested, generated: (g.charts || []).length, failed: g.failed, failed_titles: g.failed_titles || [] }); })() }}",
+        "responseBody": "={{ (() => { const g = $('Generuj SQL i Zbierz Wykresy').first().json; const sqlText = (g.charts || []).map(c => '-- ' + c.title + '\\n' + c.sql).join('\\n\\n'); return JSON.stringify({ url: 'http://localhost:3000/public/dashboard/' + $json.uuid, sql: sqlText, requested: g.requested, generated: (g.charts || []).length, failed: g.failed, failed_titles: g.failed_titles || [], retries: g.retries || 0 }); })() }}",
         "options": {}
       },
       "id": "ef0a12fe-1c1d-4009-b3d9-f249ea757b64",
@@ -334,7 +345,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const input = $input.first().json; // {specs, db_path, schema_text, user_prompt}\nconst BACKEND = 'http://fastapi_backend:8000';\nconst OLLAMA = 'http://ollama:11434';\nconst MODEL = 'qwen2.5-coder:7b';\n\nasync function callBackend(path, payload) {\n  return await this.helpers.httpRequest({\n    method: 'POST',\n    url: BACKEND + path,\n    body: payload,\n    json: true,\n  });\n}\n\nasync function callOllama(prompt) {\n  const r = await this.helpers.httpRequest({\n    method: 'POST',\n    url: OLLAMA + '/api/generate',\n    body: { model: MODEL, prompt: prompt, stream: false, format: 'json' },\n    json: true,\n    timeout: 180000,\n  });\n  return JSON.parse(r.response || '{}');\n}\n\nconst charts = [];\nconst failedTitles = [];\nfor (const spec of input.specs) {\n  let sql = '', ok = false, err = '', cols = [], sample = [];\n  for (let attempt = 0; attempt < 3; attempt++) {\n    const sqlPromptResp = await callBackend('/internal/sql-prompt', {\n      goal: spec.goal,\n      chart_type: spec.chart_type || '',\n      schema_text: input.schema_text,\n      prev_sql: sql,\n      prev_err: err,\n    });\n    const rawOut = await callOllama(sqlPromptResp.prompt);\n    const rawSql = (rawOut && rawOut.sql) || '';\n    const validated = await callBackend('/internal/process-sql-attempt', {\n      schema_name: input.db_path,\n      chart_type: spec.chart_type || '',\n      raw_sql: rawSql,\n    });\n    sql = validated.sql;\n    ok = validated.ok;\n    err = validated.error || '';\n    cols = validated.columns;\n    sample = validated.sample;\n    if (ok && sql) break;\n  }\n  if (!ok || !sql) { failedTitles.push(spec.title); continue; }\n  const finalized = await callBackend('/internal/finalize-chart', {\n    title: spec.title,\n    sql: sql,\n    chart_type: spec.chart_type || '',\n    columns: cols,\n    sample: sample,\n    user_prompt: input.user_prompt,\n  });\n  charts.push({ title: finalized.title, sql: sql, display: finalized.display, columns: cols });\n}\n\nconst dateColResp = await this.helpers.httpRequest({\n  method: 'GET',\n  url: BACKEND + '/internal/date-column?schema_name=' + encodeURIComponent(input.db_path),\n  json: true,\n});\n\nreturn [{\n  json: {\n    charts: charts,\n    db_path: input.db_path,\n    user_prompt: input.user_prompt,\n    date_columns: dateColResp.date_columns || [],\n    requested: input.specs.length,\n    failed: input.specs.length - charts.length,\n    failed_titles: failedTitles,\n  },\n}];"
+        "jsCode": "const input = $input.first().json; // {specs, db_path, schema_text, user_prompt}\nconst BACKEND = 'http://fastapi_backend:8000';\nconst OLLAMA = 'http://ollama:11434';\nconst MODEL = 'qwen2.5-coder:7b';\n\nasync function callBackend(path, payload) {\n  return await this.helpers.httpRequest({\n    method: 'POST',\n    url: BACKEND + path,\n    body: payload,\n    json: true,\n  });\n}\n\nasync function callOllama(prompt) {\n  const r = await this.helpers.httpRequest({\n    method: 'POST',\n    url: OLLAMA + '/api/generate',\n    body: { model: MODEL, prompt: prompt, stream: false, format: 'json' },\n    json: true,\n    timeout: 180000,\n  });\n  return JSON.parse(r.response || '{}');\n}\n\nconst charts = [];\nconst failedTitles = [];\nlet totalRetries = 0;\nfor (const spec of input.specs) {\n  let sql = '', ok = false, err = '', cols = [], sample = [];\n  for (let attempt = 0; attempt < 3; attempt++) {\n    if (attempt > 0) totalRetries++;\n    const sqlPromptResp = await callBackend('/internal/sql-prompt', {\n      goal: spec.goal,\n      chart_type: spec.chart_type || '',\n      schema_text: input.schema_text,\n      prev_sql: sql,\n      prev_err: err,\n    });\n    const rawOut = await callOllama(sqlPromptResp.prompt);\n    const rawSql = (rawOut && rawOut.sql) || '';\n    const validated = await callBackend('/internal/process-sql-attempt', {\n      schema_name: input.db_path,\n      chart_type: spec.chart_type || '',\n      raw_sql: rawSql,\n      goal: spec.goal,\n    });\n    sql = validated.sql;\n    ok = validated.ok;\n    err = validated.error || '';\n    cols = validated.columns;\n    sample = validated.sample;\n    if (ok && sql) break;\n  }\n  if (!ok || !sql) { failedTitles.push(spec.title); continue; }\n  const finalized = await callBackend('/internal/finalize-chart', {\n    title: spec.title,\n    sql: sql,\n    chart_type: spec.chart_type || '',\n    columns: cols,\n    sample: sample,\n    user_prompt: input.user_prompt,\n  });\n  charts.push({ title: finalized.title, sql: sql, display: finalized.display, columns: cols });\n}\n\nconst dateColResp = await this.helpers.httpRequest({\n  method: 'GET',\n  url: BACKEND + '/internal/date-column?schema_name=' + encodeURIComponent(input.db_path),\n  json: true,\n});\n\nreturn [{\n  json: {\n    charts: charts,\n    db_path: input.db_path,\n    user_prompt: input.user_prompt,\n    date_columns: dateColResp.date_columns || [],\n    requested: input.specs.length,\n    failed: input.specs.length - charts.length,\n    failed_titles: failedTitles,\n    retries: totalRetries,\n  },\n}];"
       },
       "id": "bbbb2222-0000-0000-0000-000000000002",
       "name": "Generuj SQL i Zbierz Wykresy",
@@ -368,8 +379,8 @@
       "type": "@n8n/n8n-nodes-langchain.lmOllama",
       "typeVersion": 1,
       "position": [
-        768,
-        592
+        1264,
+        528
       ],
       "credentials": {
         "ollamaApi": {
@@ -388,8 +399,8 @@
       "type": "@n8n/n8n-nodes-langchain.chainLlm",
       "typeVersion": 1.6,
       "position": [
-        736,
-        128
+        976,
+        432
       ]
     },
     {
@@ -460,8 +471,8 @@
       "type": "@n8n/n8n-nodes-langchain.chainLlm",
       "typeVersion": 1.6,
       "position": [
-        464,
-        880
+        960,
+        608
       ]
     },
     {
@@ -473,8 +484,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        768,
-        880
+        1392,
+        624
       ]
     },
     {
@@ -505,12 +516,14 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        1616,
-        384
+        1792,
+        320
       ]
     },
     {
       "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
         "jsCode": "return [{ json: { error: 'Model nie wygenerowal poprawnego SQL dla zadnego z zaplanowanych wykresow (po probach retry). Sprobuj prostszy cel albo inne typy wykresow.' } }];"
       },
       "id": "llllcccc-0000-0000-0000-00000000000c",
