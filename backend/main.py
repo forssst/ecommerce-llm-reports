@@ -5,6 +5,7 @@ import uuid
 import sqlite3
 import shutil
 import json
+from decimal import Decimal
 from string import Formatter
 from typing import Optional
 from datetime import datetime, date, timezone, timedelta
@@ -176,6 +177,24 @@ _RELATIVE_DATE_FILTER = re.compile(r'(?i)(current_date|now\(\))\s*[-+]\s*interva
 _RELATIVE_PERIOD_IN_TITLE = re.compile(
     r'(?i)\s*(?:w\s+ci[ąa]gu\s+|w\s+|z\s+|za\s+)?ostatni\w*\s*(?:\d+\s*)?'
     r'(?:miesi[ąa]c\w*|miesi[ęe]cy|dni\w*|tygodni\w*|lat(?:ach)?|rok\w*)')
+
+# Jawny rok w TYTULE: "w 2024 roku", "w roku 2024", "za 2023". Analogiczny problem jak
+# wyzej: retry po pustym wyniku (guard 0 wierszy) usuwa filtr roku z SQL, a tytul z planu
+# dalej obiecuje rok, ktorego SQL nie filtruje.
+_EXPLICIT_YEAR_IN_TITLE = re.compile(
+    r'(?i)\s*(?:w|za|z)\s+(?:roku\s+)?(?P<year>(?:19|20)\d{2})(?:\s+rok\w*)?')
+
+
+def _strip_stale_period_in_title(title, sql, fallback):
+    """Usuwa z tytulu obietnice okresu ("ostatnie 3 miesiace", "w 2024 roku"), ktorego
+    zaakceptowany SQL faktycznie nie filtruje — inaczej tytul klamie o zakresie danych."""
+    if "where" not in sql.lower() and _RELATIVE_PERIOD_IN_TITLE.search(title):
+        title = _RELATIVE_PERIOD_IN_TITLE.sub("", title)
+    m = _EXPLICIT_YEAR_IN_TITLE.search(title)
+    if m and m.group("year") not in sql:
+        title = _EXPLICIT_YEAR_IN_TITLE.sub("", title)
+    title = re.sub(r'\s{2,}', ' ', title).strip(" ,–-")
+    return title or (fallback or "")[:60].strip()
 
 # Znaki spoza polskiego alfabetu: CJK, cyrylica oraz łacińskie diakrytyki innych języków
 # (np. węgierskie á/ő/ű, niemieckie ä/ß, czeskie š/č). Polskie ąćęłńóśźż są dozwolone.
@@ -480,6 +499,25 @@ def _hint_missing_column(schema_name: str, error_msg: str) -> str:
         return error_msg
 
 
+def _check_has_metric(cols, sample, chart_type=None):
+    """Wykres (poza tabelą) potrzebuje co najmniej jednej kolumny numerycznej. SQL bez
+    agregacji (same kolumny tekstowe/daty) wykonuje się poprawnie i zwraca wiersze, ale
+    Metabase nie umie go narysować — karta pokazuje 'Which columns do you want to use?'."""
+    if chart_type == "table" or not cols or not sample:
+        return None
+    if chart_type is None and len(cols) < 2:
+        return None  # _infer_display wybierze wtedy tabelę — renderowalne
+    for i in range(len(cols)):
+        v = next((row[i] for row in sample if len(row) > i and row[i] is not None), None)
+        if isinstance(v, (int, float, Decimal)) and not isinstance(v, bool):
+            return None
+    return (
+        "Wynik nie zawiera ŻADNEJ kolumny numerycznej — takich danych nie da się narysować "
+        "jako wykres. Dodaj agregację (np. COUNT(*), SUM(kolumna)) i GROUP BY po kolumnie "
+        "kategorii. Przykład: SELECT kategoria, COUNT(*) AS liczba FROM tabela GROUP BY kategoria"
+    )
+
+
 def _run_and_validate(schema_name, sql, chart_type=None):
     """Sprawdza SQL na schemacie PostgreSQL i zwraca (ok, error, kolumny, próbka)."""
     if not schema_name:
@@ -496,6 +534,9 @@ def _run_and_validate(schema_name, sql, chart_type=None):
         label_err = _check_label_column(cols, sample, chart_type)
         if label_err:
             return False, label_err, cols, sample
+        metric_err = _check_has_metric(cols, sample, chart_type)
+        if metric_err:
+            return False, metric_err, cols, sample
         if chart_type == "smartscalar":
             ss_err = _check_smartscalar_shape(cols, sample)
             if ss_err:
@@ -797,10 +838,7 @@ def _generate_multichart(g, db, db_id):
         if not ok or not sql:
             print(f"[SKIP] chart='{title}' po {3} probach — pomijam")
             continue
-        # Tytul obiecuje "ostatnie X miesiecy", a zaakceptowany SQL nie ma zadnego WHERE
-        # (np. retry po _RELATIVE_DATE_FILTER usunal filtr) -> usun fraze z tytulu.
-        if "where" not in sql.lower() and _RELATIVE_PERIOD_IN_TITLE.search(title):
-            title = _RELATIVE_PERIOD_IN_TITLE.sub("", title).strip(" ,–-") or (g.prompt or goal)[:60].strip()
+        title = _strip_stale_period_in_title(title, sql, g.prompt or goal)
         display = ctype if ctype in _VALID_DISPLAYS else _infer_display(cols, sample)
         charts.append((title, sql, display, cols))
 
@@ -1543,9 +1581,7 @@ class InternalFinalizeChartIn(BaseModel):
 @app.post("/internal/finalize-chart")
 def internal_finalize_chart(body: InternalFinalizeChartIn):
     ctype = (body.chart_type or "").strip().lower() or None
-    title = body.title
-    if "where" not in body.sql.lower() and _RELATIVE_PERIOD_IN_TITLE.search(title):
-        title = _RELATIVE_PERIOD_IN_TITLE.sub("", title).strip(" ,–-") or (body.user_prompt or "")[:60].strip()
+    title = _strip_stale_period_in_title(body.title, body.sql, body.user_prompt)
     display = ctype if ctype in _VALID_DISPLAYS else _infer_display(body.columns, body.sample)
     return {"title": title, "display": display}
 
