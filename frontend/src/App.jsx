@@ -466,6 +466,7 @@ export default function App() {
                         Cel analityczny
                       </label>
                       <textarea rows="5" placeholder="Co chcesz zobaczyć? Np. 'TOP 10 kategorii wg sprzedaży i trend miesięczny'"
+                        title="Opisz po polsku, co ma pokazywać dashboard — AI samo dobierze SQL i wykresy. Im konkretniej (liczby, okresy, podział), tym trafniejszy wynik."
                         value={goal} onChange={e => setGoal(e.target.value)}
                         className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
                       <div className="mt-1.5 flex items-center gap-2">
@@ -522,16 +523,21 @@ export default function App() {
                           { label: "Kołowy",             value: "kołowy" },
                           { label: "Tabela",             value: "tabela" },
                           { label: "Poziomy słupkowy",   value: "poziomy słupkowy" },
-                          { label: "Punktowy",           value: "punktowy" },
-                          { label: "Lejkowy",            value: "lejkowy" },
-                          { label: "Kaskadowy",          value: "kaskadowy" },
-                          { label: "Licznik",            value: "licznik" },
-                          { label: "Kombinowany",        value: "kombinowany" },
-                        ].map(({ label, value }) => {
+                          { label: "Punktowy",           value: "punktowy",
+                            title: "Chmura punktów pokazująca zależność między dwiema wartościami liczbowymi." },
+                          { label: "Lejkowy",            value: "lejkowy",
+                            title: "Malejące etapy procesu, np. liczba klientów na kolejnych etapach sprzedaży." },
+                          { label: "Kaskadowy",          value: "kaskadowy",
+                            title: "Krok po kroku pokazuje, jak kolejne dodatnie i ujemne wartości składają się na wynik końcowy." },
+                          { label: "Licznik",            value: "licznik",
+                            title: "Jedna duża liczba bez podziału na kategorie, np. suma sprzedaży ogółem." },
+                          { label: "Kombinowany",        value: "kombinowany",
+                            title: "Łączy dwa typy wykresu w jednym (np. słupki + linia) dla dwóch różnych miar naraz." },
+                        ].map(({ label, value, title }) => {
                           const idx = selectedTypes.indexOf(value);
                           const isSelected = idx !== -1;
                           return (
-                            <button key={value} type="button"
+                            <button key={value} type="button" title={title}
                               onClick={() => setSelectedTypes(prev =>
                                 isSelected ? prev.filter(t => t !== value) : [...prev, value]
                               )}
@@ -627,7 +633,8 @@ export default function App() {
                           )}
                         </span>
                         {result.chart_summary?.failed > 0 && (
-                          <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
+                          <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5"
+                            title="AI kilkukrotnie próbowało poprawić zapytanie SQL dla tego wykresu i wciąż nie dało poprawnego wyniku — dashboard i tak powstał, tylko bez tych wykresów.">
                             ⚠ {result.chart_summary.failed} z {result.chart_summary.requested} wykresów nie przeszło walidacji
                             {result.chart_summary.failed_titles?.length > 0 && (
                               <> ({result.chart_summary.failed_titles.join(", ")})</>
@@ -637,10 +644,12 @@ export default function App() {
                       </div>
                       <div className="flex items-center gap-3">
                         <a href={result.metabase?.url} target="_blank" rel="noopener noreferrer"
+                          title="Otwiera ten sam dashboard w Metabase (narzędziu wizualizacji) w osobnej karcie — przydatne np. do udostępnienia linku."
                           className="text-xs bg-blue-600 hover:bg-blue-700 text-white font-semibold px-3 py-1.5 rounded-lg transition">
                           Otwórz w Metabase ↗
                         </a>
                         <button onClick={() => setShowSql(v => !v)}
+                          title="Pokazuje zapytanie SQL, które AI wygenerowało i wykonało na bazie — techniczny podgląd, przydatny do weryfikacji, nie wymagany do korzystania z dashboardu."
                           className="text-xs text-blue-600 hover:underline">
                           {showSql ? "Ukryj SQL" : "Pokaż SQL"}
                         </button>
@@ -730,10 +739,11 @@ export default function App() {
                       <li key={db.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-100">
                         <div>
                           <p className="text-sm font-semibold text-gray-800">{db.name}</p>
-                          <p className="text-xs text-gray-400 mt-0.5">{db.file_path}</p>
+                          <p className="text-xs text-gray-400 mt-0.5" title="Wewnętrzna nazwa schematu bazy w Postgresie — nie musisz jej nigdzie używać, to informacja techniczna.">{db.file_path}</p>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className="text-xs bg-slate-200 text-slate-600 px-2 py-1 rounded font-mono">ID {db.id}</span>
+                          <span className="text-xs bg-slate-200 text-slate-600 px-2 py-1 rounded font-mono"
+                            title="Wewnętrzny numer identyfikacyjny bazy — bez znaczenia dla korzystania z aplikacji.">ID {db.id}</span>
                           <button onClick={() => handleDeleteDb(db.id, db.name)}
                             className="text-xs text-red-400 hover:text-red-600 hover:bg-red-50 px-2 py-1 rounded transition">
                             Usuń
@@ -813,7 +823,8 @@ export default function App() {
                             {item.sql || "Brak SQL"}
                           </pre>
                           <div className="flex items-center justify-between mt-2">
-                            <p className="text-xs text-gray-400">
+                            <p className="text-xs text-gray-400"
+                              title="Ile razy AI musiało samo poprawić błędne zapytanie SQL, zanim dashboard się udał — 0 oznacza, że wyszło za pierwszym razem.">
                               Auto-korekty: {item.retry_count} · ID: {item.id}
                             </p>
                             <button onClick={() => handleDeleteQuery(item.id)}
