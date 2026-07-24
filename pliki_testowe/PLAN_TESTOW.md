@@ -376,6 +376,52 @@ Cel testu: multi-upload nie zepsuł dotychczasowego zachowania dla 1 pliku.
 - [ ] Nazwa bazy w liście = nazwa pliku (jak przed zmianą), tabela `produkty`
   BEZ prefiksu z nazwą pliku
 
+## K. Weryfikacja zgodności wykres ↔ surowe dane (punkt 7 promotora)
+
+Promotor zapytał o dowód, że to co pokazuje wykres w Metabase faktycznie zgadza się z
+wynikiem zapytania SQL na surowych danych — nie tylko „czy dashboard się wygenerował".
+Instrukcja do samodzielnego wykonania dla dowolnego już wygenerowanego dashboardu.
+
+### K1 — Pobranie dokładnego SQL użytego przez wykres
+1. W Kreatorze po wygenerowaniu dashboardu kliknąć **Pokaż SQL** (albo w Metabase: karta
+   → „…" → „Edytuj pytanie" → widoczny natywny SQL).
+2. Skopiować SQL dokładnie — jeśli był aktywny filtr dat, podmienić `{{start_date}}` /
+   `{{end_date}}` na konkretne daty albo usunąć warunek w `[[AND ...]]`.
+
+### K2 — Wykonanie tego samego SQL poza warstwą wizualizacji
+1. `docker exec -it postgres_analytics psql -U analyst -d analytics`
+2. `SET search_path TO <nazwa_schematu>;` — nazwa schematu to `file_path` z zakładki
+   „Bazy danych" (ten sam ciąg, który ma teraz tooltip „wewnętrzna nazwa schematu…").
+3. Wkleić i wykonać SQL z kroku K1 wprost w `psql`.
+
+Alternatywa bez terminala: w Metabase → „Nowe pytanie" → „SQL" → wkleić ten sam SQL na
+tej samej bazie. Szybsze, ale słabszy dowód niezależności (nadal silnik zapytań Metabase).
+
+### K3 — Porównanie surowego wyniku z wykresem
+Dla każdego sprawdzanego wykresu:
+- [ ] Liczba kategorii/punktów w surowym wyniku = liczba słupków/wycinków/punktów na
+  wykresie (żadna kategoria nie zniknęła ani się nie zdublowała)
+- [ ] Wartości liczbowe z surowego wyniku zgadzają się z tym, co pokazuje tooltip po
+  najechaniu na słupek/wycinek/punkt
+- [ ] Dla wykresu kołowego: suma wszystkich wycinków = `SUM()` z surowego zapytania
+- [ ] Sortowanie/kolejność (np. TOP N malejąco) zgadza się między SQL a wykresem
+- [ ] Przy aktywnym filtrze dat: surowe zapytanie z tymi samymi datami w `WHERE` daje
+  dokładnie to, co wykres z ustawionym widgetem dat
+
+### K4 — Dokumentowanie wyniku (materiał do rozdziału Ewaluacja)
+1. Zrzut ekranu surowego wyniku SQL (psql albo „Nowe pytanie" w Metabase)
+2. Zrzut ekranu wykresu obok (najlepiej z najechanym tooltipem)
+3. Jedno zdanie: „wykres X wiernie odzwierciedla wynik zapytania" albo opis rozbieżności
+
+Wystarczy zrobić to dla 3–4 różnych wykresów (jeden bar, jeden pie, jeden line z filtrem
+dat) — nie trzeba dla wszystkich dotychczas wygenerowanych dashboardów.
+
+**Uwaga — czym się to różni od `golden_set.py`:** golden set (`docs/09` pkt 4) porównuje
+wynik zapytania WYGENEROWANEGO PRZEZ AI z wynikiem ręcznie napisanego wzorcowego SQL —
+sprawdza, czy AI napisało SEMANTYCZNIE poprawne zapytanie. Blok K sprawdza coś innego:
+czy Metabase wiernie RENDERUJE wynik zapytania, które już uznaliśmy za poprawne —
+integralność warstwy wizualizacji, nie integralność SQL.
+
 ---
 
 ## Dane rejestrowane przy każdym teście

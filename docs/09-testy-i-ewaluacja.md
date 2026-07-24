@@ -117,7 +117,80 @@ by je obsłużył przy większym budżecie. Granica: **między N=3 a N=5**, przy
 konkretna, nie „niestabilność". Wyniki CSV: `stress_test_results_*.csv`
 (gitignore; kopia w głównym repo), wykres: artifact z sesji 2026-07-05.
 
-## 6. Jak te poziomy się uzupełniają (na obronę)
+## 6. Ocena zgodności z dobrymi praktykami wizualizacji (uwaga promotora, punkt 6)
+
+Promotor zapytał, czy dobór typów i układu wykresów jest zgodny z dobrymi praktykami
+wizualizacji danych — nie tylko „czy działa technicznie". Metoda: przegląd 30 kart
+typu pie/line z 20 ostatnio wygenerowanych dashboardów (Metabase API, `/api/dashboard/{id}`
++ `/api/card/{id}/query` — pobrane bezpośrednio wyniki zapytań, nie tylko definicje kart)
+wobec ogólnie przyjętych zasad doboru formy wykresu: *magnitude/porównanie kategorii* →
+słupkowy, *identity/udział całości* → kołowy TYLKO dla nielicznych (≤5–6) kategorii,
+*zmiana w czasie* → liniowy/obszarowy, *pojedyncza wartość* → licznik; oraz anty-wzorca
+„przeciążona liczba serii/kategorii" (>8–10 elementów na wykresie liniowym lub kołowym =
+nieczytelne — zamiast tego agregacja „Pozostałe", small multiples albo inna forma).
+
+### Znalezione naruszenia (realne karty z wygenerowanych dashboardów)
+
+| Dashboard/karta | Tytuł karty | Forma | Problem | Zasada naruszona |
+|---|---|---|---|---|
+| 132/377 | Suma sprzedaży po jednostce dla każdego artysty | kołowy | 165 unikalnych artystów w wyniku (SELECT bez LIMIT) — Metabase automatycznie zwija ogon w kategorię **„Other" = 78,43% całości** (zweryfikowane wizualnie, zrzut ekranu) | kategoria „Other" dominująca nad wszystkimi widocznymi wycinkami razem wziętymi czyni wykres bezużytecznym — nie pokazuje TEGO, co miał pokazać (kto naprawdę dominuje w sprzedaży) |
+| 143/406 | Trend sprzedaży produktów w 2024 roku | liniowy | **25 nakładających się serii** (`GROUP BY miesiac, produkt`, 25 unikalnych produktów) | ≤8–10 serii na wykresie liniowym |
+| 130/372 | Top 10 produktów | kołowy | ranking TOP N pokazany jako kołowy (10 wycinków) | ranking/porządek → słupkowy, nie kołowy |
+| 145/411 | Udział kategorii produktów w sprzedaży | kołowy | SQL grupuje po `(miesiac, kategoria)` → **114 wycinków** zamiast 5 kategorii | tytuł ≠ SQL (ten sam wzorzec co B4, docs/06) |
+| 139/393 | Wartość zamówień według segmentu klienta | kołowy | tytuł mówi „wartość", SQL liczy `SUM(ilosc)` — to ilość, nie wartość | metryka w tytule ≠ metryka w SQL |
+| 136/384 | Procentowy udział produktów w każdym segmencie klienta | kołowy | tytuł obiecuje podział po PRODUKCIE, SQL grupuje tylko po segmencie (bez wymiaru produktu) | tytuł nadinterpretowuje własny SQL |
+
+Wiersze/serie policzone bezpośrednio z wyniku zapytania (`/api/card/{id}/query`), nie
+zgadywane z SQL — np. karta 406: 111 wierszy wynikowych, 25 unikalnych wartości w kolumnie
+`produkt`. Obie skrajne karty (132/377, 143/406) zweryfikowane też WIZUALNIE w przeglądarce
+(2026-07-24): karta 406 to potwierdzony „spaghetti chart" — 25 linii w legendzie (w tym
+powtarzające się odcienie tego samego koloru dla różnych produktów, np. kilka linii
+niebieskich pod rząd), zero czytelności który produkt jest który. Karta 377 okazała się
+mieć INNY problem niż pierwotnie zakładano: Metabase NIE renderuje 165 osobnych wycinków,
+tylko automatycznie zwija długi ogon w kategorię „Other" — ale to nie ratuje wykresu,
+bo „Other" wychodzi na **78,43% całości**, więc widoczne pozostaje tylko 5 nic nieznaczących
+wycinków (Iron Maiden 5,95% … Lost 3,50%) obok jednej nieprzejrzystej szarej masy, która
+skrywa właśnie to, co wykres miał pokazać (kto faktycznie dominuje w sprzedaży).
+Zrzuty ekranu obu kart: `pliki_testowe/screeny_wizualizacja/` (poza gitem, lokalnie —
+gotowe jako rysunki do rozdziału Ewaluacja/Dyskusja).
+
+### Kontrola — co jest zgodne z dobrymi praktykami
+- Karty słupkowe grupujące po kategorii/mieście/segmencie: 3–8 kategorii — w normie.
+- Karty liniowe z jedną serią (miesiąc → wartość, 12–24 punkty, np. dash 128/367,
+  140/398): poprawna forma dla trendu w czasie.
+- Karty liniowe z podziałem po mieście (dash 136/386, 139/395): 6 serii — mieści się
+  w progu ≤8, czytelne.
+
+### Wniosek dla pracy
+System poprawnie dobiera BAZOWĄ formę wykresu (słupkowy do porównań, liniowy do trendu)
+w większości przypadków, ale nie waliduje KARDYNALNOŚCI wymiaru grupującego przed wyborem
+formy — etap planowania (model 7B) wybiera typ wykresu (pie/line) niezależnie od tego,
+ile odrębnych wartości faktycznie zwróci SQL dla kolumny grupującej. To osobna klasa
+błędu niż już udokumentowane „tytuł≠SQL" (docs/06) — w przypadkach 132/377 i 143/406
+tytuł i SQL są ze sobą spójne, a mimo to forma jest źle dobrana do LICZBY kategorii.
+**Naprawione (2026-07-24, `_check_category_cardinality`, `docs/06` §4):** backend przed
+budową karty dolicza `SELECT COUNT(DISTINCT <kolumna>)` na PEŁNYM wyniku (nie na 5-wierszowej
+próbce — próbka nigdy by nie wystarczyła) i zwraca `ok=False` z podpowiedzią, gdy kołowy
+ma >8 kategorii albo liniowy ma >8 serii (przy ≥3 kolumnach — zwykły 1-seryjny trend, sama
+data+miara, nie jest w ogóle sprawdzany, żeby nie fałszywie odrzucać normalnego trendu
+12-24 punktów). Błąd wraca tym samym kanałem retry co pozostałe guardy — model dostaje
+podpowiedź „ogranicz do najważniejszych 8 (…) albo zagreguj rzadsze wartości w „Inne""
+i może spróbować ponownie, zanim wykres zostanie porzucony po 3 próbach.
+**Zweryfikowane bezpośrednio na dokładnie tych samych zapytaniach SQL, które wyprodukowały
+karty 132/377 i 143/406** (`/internal/process-sql-attempt`): oba teraz zwracają `ok=false`
+z czytelnym komunikatem. Kontrolnie sprawdzone też 3 przypadki, które MUSIAŁY dalej przechodzić
+(żeby nie wprowadzić fałszywych alarmów): kołowy z 5 kategoriami, liniowy z 6 seriami (miasta,
+karty 136/386 i 139/395) i zwykły 1-seryjny trend 12-miesięczny — wszystkie trzy `ok=true`
+bez zmian. Pełny pakiet testów regresyjnych: **33 passed** (bez regresji).
+
+Warto zaznaczyć: sam Metabase już CZĘŚCIOWO łagodzi ten problem po swojej stronie
+(automatyczne zwijanie ogona w „Other" na wykresie kołowym), ale to nie wystarcza — karta
+132/377 pokazywała, że mechanizm Metabase'a może wyprodukować wykres, na którym dominująca
+kategoria to nieinterpretowalny bucket „Other" (78%). Dlatego odpowiedzialność za sensowny
+próg kardynalności musiała leżeć wyżej, na etapie WALIDACJI SQL przed budową karty, nie na
+etapie renderowania — stąd guard w Pythonie (`process-sql-attempt`), nie w Metabase ani w JS.
+
+## 7. Jak te poziomy się uzupełniają (na obronę)
 
 | Poziom | Pytanie, na które odpowiada |
 |---|---|
@@ -133,3 +206,6 @@ konkretna, nie „niestabilność". Wyniki CSV: `stress_test_results_*.csv`
 3. Czym różni się werdykt VALUES od EXACT i jaki realny przypadek go wymusił?
 4. Odtwórz diagnozę stress-testu: skąd wiadomo, że winny jest timeout, a nie model?
 5. Który poziom testów znalazł halucynowane wartości kolumn i CZEMU tylko on mógł?
+6. Karta 132/377 miała poprawny SQL i poprawny tytuł, a mimo to była złym wykresem —
+   wyjaśnij, czym różni się ten błąd od „tytuł≠SQL", i dlaczego `_check_category_cardinality`
+   musiał liczyć DISTINCT na pełnym wyniku, a nie na 5-wierszowej próbce jak reszta guardów.

@@ -22,6 +22,7 @@ przykłady żądań/odpowiedzi, treści promptów z adnotacjami, wyniki per prom
 | [docs/08-frontend.md](docs/08-frontend.md) | pełna mapa stanu, przepływy UI, kontrakty frontend↔backend |
 | [docs/09-testy-i-ewaluacja.md](docs/09-testy-i-ewaluacja.md) | 4 poziomy testów + PEŁNE wyniki per prompt (harness/golden/stress) |
 | [docs/10-bezpieczenstwo.md](docs/10-bezpieczenstwo.md) | model zagrożeń, 4 luki jako studia przypadku, defense-in-depth, otwarta lista |
+| [docs/11-analiza-konkurencji.md](docs/11-analiza-konkurencji.md) | przegląd 6 istniejących narzędzi NL-to-SQL/auto-dashboard (komercyjne + open source), tabela porównawcza, czym różni się ten projekt |
 
 Każdy plik serii kończy się sekcją „Sprawdź się" — razem ~50 pytań kontrolnych
 na jutrzejszą naukę.

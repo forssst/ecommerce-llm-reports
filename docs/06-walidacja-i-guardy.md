@@ -69,6 +69,20 @@ sample = cur.fetchmany(5)                     # próbka do dalszych guardów
 - `_check_smartscalar_shape(cols, sample)` — licznik w Metabase to wykres
   TRENDU: pierwsza kolumna musi być datą (próbka wartości parsowalna jako
   data), inaczej karta pada z „Group only by a time field". Rodowód: D5.
+- `_check_category_cardinality(cur, sql, cols, ctype)` (2026-07-24) — kołowy
+  z >8 unikalnymi wartościami w kolumnie etykiety, albo liniowy z >8 unikalnymi
+  wartościami w kolumnie serii (gdy są ≥3 kolumny: data + seria + miara —
+  zwykły 1-seryjny trend, 2 kolumny, nie jest sprawdzany). Jedyny guard, który
+  NIE wystarcza sobie próbką 5 wierszy z `_run_and_validate` — dolicza
+  `SELECT COUNT(DISTINCT kolumna) FROM (sql) AS sub` na PEŁNYM wyniku, na tym
+  samym, jeszcze otwartym połączeniu, zanim `conn.close()`. Rodowód: analiza
+  punktu 6 uwag promotora (docs/09 §6) — realne dashboardy z 165-kategoriowym
+  wykresem kołowym (Metabase zwija ogon w „Other" = 78% całości, co i tak
+  czyni wykres bezużytecznym) i 25-seriowym wykresem liniowym (nieczytelny
+  „spaghetti chart"), zweryfikowane też wizualnie w przeglądarce. Odróżnia się
+  od `_check_label_column`/`_check_has_metric` tym, że tytuł i SQL mogą być ze
+  sobą w pełni zgodne — problem jest w LICZBIE kategorii względem wybranego
+  typu wykresu, nie w treści zapytania.
 
 ## 5. Guardy TOP N (trzy różne!)
 
@@ -137,7 +151,8 @@ backend /enhance:   TOP N (oba kierunki), CJK, SQL-strip, rdzenie słów
 backend /describe:  guard pustego schematu, strip CJK/cyrylicy
 backend /internal/process-plan:    język planu, wymuszenie typów, fallback tytułu
 backend /internal/process-sql-attempt: _clean_sql, relative-date, TOP N->LIMIT,
-                                       wykonanie+kształt, 0 wierszy, log FAIL
+                                       wykonanie+kształt, kardynalność pie/line,
+                                       0 wierszy, log FAIL
 backend /internal/finalize-chart:  okres względny w tytule, wybór displayu
 backend /generate:  _text_column_values, czytelny błąd nie-JSON
 n8n:       retry planu (IF), pętla 3 prób SQL, bramka 0 wykresów,

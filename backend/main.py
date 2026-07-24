@@ -518,6 +518,43 @@ def _check_has_metric(cols, sample, chart_type=None):
     )
 
 
+_CARDINALITY_LIMITED_TYPES = {"pie", "line"}
+_MAX_CATEGORY_CARDINALITY = 8
+
+
+def _check_category_cardinality(cur, sql, cols, chart_type=None, limit=_MAX_CATEGORY_CARDINALITY):
+    """Kołowy z >N kategoriami w kolumnie etykiety, albo liniowy z >N seriami (osobna
+    kolumna grupująca MIĘDZY osią X a miarą) — w obu przypadkach Metabase renderuje
+    nieczytelny wykres (linie nachodzące na siebie, albo pie zdominowany przez własny
+    fallback "Other"). Liczy DISTINCT na PEŁNYM wyniku przez podzapytanie — 5-wierszowa
+    próbka z _run_and_validate nigdy nie wystarczy do wykrycia kardynalności.
+    Dla "line" sprawdzamy TYLKO gdy są ≥3 kolumny (data + seria + miara) — zwykły
+    jednoserowy trend (data + miara, 2 kolumny) ma prawo mieć 12-24 punktów w osi X,
+    to nie jest kardynalność kategorii."""
+    if chart_type not in _CARDINALITY_LIMITED_TYPES or not cols:
+        return None
+    if chart_type == "line" and len(cols) < 3:
+        return None
+    label_col = cols[0] if chart_type == "pie" else cols[1]
+    try:
+        cur.execute(
+            pgsql.SQL("SELECT COUNT(DISTINCT {}) FROM ({}) AS _card_sub").format(
+                pgsql.Identifier(label_col), pgsql.SQL(sql.rstrip().rstrip(";"))
+            )
+        )
+        distinct_count = cur.fetchone()[0]
+    except Exception:
+        return None  # błąd samego liczenia kardynalności nie blokuje reszty walidacji
+    if distinct_count > limit:
+        return (
+            f"Wynik ma {distinct_count} unikalnych wartości w kolumnie '{label_col}' — "
+            f"za dużo dla czytelnego wykresu {chart_type} (limit {limit}). Ogranicz do "
+            f"najważniejszych {limit} kategorii (np. ORDER BY <miara> DESC LIMIT {limit}) "
+            f"albo zagreguj rzadsze wartości w kategorię 'Inne'."
+        )
+    return None
+
+
 def _run_and_validate(schema_name, sql, chart_type=None):
     """Sprawdza SQL na schemacie PostgreSQL i zwraca (ok, error, kolumny, próbka)."""
     if not schema_name:
@@ -530,6 +567,7 @@ def _run_and_validate(schema_name, sql, chart_type=None):
             cur.execute(sql)
             cols = [d[0] for d in cur.description] if cur.description else []
             sample = [list(r) for r in cur.fetchmany(5)]
+            card_err = _check_category_cardinality(cur, sql, cols, chart_type)
         conn.close()
         label_err = _check_label_column(cols, sample, chart_type)
         if label_err:
@@ -541,6 +579,8 @@ def _run_and_validate(schema_name, sql, chart_type=None):
             ss_err = _check_smartscalar_shape(cols, sample)
             if ss_err:
                 return False, ss_err, cols, sample
+        if card_err:
+            return False, card_err, cols, sample
         return True, None, cols, sample
     except Exception as e:
         enriched = _hint_missing_column(schema_name, str(e))

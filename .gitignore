@@ -49,6 +49,7 @@ n8n-task-runners.json
 screenyztestów/
 screeny z testu n8n/
 screenyztestun8nfinal/
+pliki_testowe/screeny_wizualizacja/
 
 # środowisko testowe
 .pytest_cache/
