@@ -323,6 +323,61 @@ Cel: `przychody według kraju klienta`
 
 ---
 
+## J. multiplik_test/ — wgrywanie kilku plików naraz jako jedna baza
+
+Trzy osobne pliki Excel (`sklep_produkty.xlsx`, `sklep_klienci.xlsx`,
+`sklep_zamowienia.xlsx`, katalog `pliki_testowe/multiplik_test/`), sensowne wyłącznie
+razem — test funkcji dodanej 2026-07-23 na wniosek promotora (możliwość analizy kilku
+osobnych plików naraz, np. kilku arkuszy Excel). Zakładka „Bazy danych", pole pliku
+z atrybutem wielokrotnego wyboru.
+
+### J1 — Wgranie trzech plików naraz pod jedną nazwą
+Cel testu: scalenie wielu plików w jeden schemat, prefiksowanie nazw tabel.
+1. W polu pliku zaznaczyć jednocześnie `sklep_produkty.xlsx`, `sklep_klienci.xlsx`,
+   `sklep_zamowienia.xlsx`
+2. W polu „Nazwa bazy" wpisać `sklep_multi` → **Wgraj**
+3. Rozwinąć **Pokaż tabele i kolumny**
+- [x] Jeden wpis na liście „Zarejestrowane bazy" (nie trzy) — baza `sklepik`, 2026-07-23
+- [x] 3 tabele: `sklep_produkty__produkty`, `sklep_klienci__klienci`,
+  `sklep_zamowienia__zamowienia` — potwierdzone w podglądzie SQL wygenerowanych zapytań
+- [x] Kolumna `data_zamowienia` ma typ **timestamp** (nie text) — `DATE_TRUNC('month', ...)` działa w wygenerowanym SQL
+
+### J2 — Walidacja: brak nazwy bazy przy kilku plikach
+Cel testu: system nie zgaduje nazwy sam, gdy plików jest więcej niż jeden.
+1. Zaznaczyć 2 z powyższych plików, zostawić puste pole „Nazwa bazy" → **Wgraj**
+- [ ] Czytelny komunikat błędu (nie 500, nie cichy brak reakcji)
+
+### J3 — Zapytanie wymagające złączenia wszystkich trzech plików (test kluczowy)
+Cel testu: właściwy dowód dla promotora — dashboard faktycznie łączy dane z osobno
+wgranych plików, nie tylko technicznie akceptuje upload.
+Cel: `suma sprzedanej ilości według kategorii produktu i miasta klienta`
+(wymaga: zamowienia + produkty + klienci)
+- [x] Wykres pokazuje kategorie i/lub miasta jako etykiety (nie identyfikatory) — 2026-07-23
+- [x] Wartości sumaryczne wiarygodne (300 zamówień, 25 produktów, 40 klientów) — suma ilości 911 spójna między wykresami
+- [x] W podglądzie SQL widoczne złączenie (JOIN) wszystkich trzech tabel — `sklep_zamowienia__zamowienia JOIN sklep_klienci__klienci ... JOIN sklep_produkty__produkty`
+
+**Dodatkowo przetestowane szerzej niż zakładał scenariusz** (kolejne prompty na tej samej
+bazie `sklepik`, 2026-07-23): proste agregacje 1-tabelowe, złączenia 2-tabelowe, top N
+klientów, rok-do-roku — wszystkie zakończone sukcesem (1-2 auto-korekty SQL na trudniejszych).
+Zaobserwowane 2 przypadki znanego ograniczenia modelu 7B (nie błąd kodu, materiał do
+Ewaluacji): (a) wykres kołowy "udział kategorii produktów" pogrupował błędnie po dacie
+zamiast po kategorii — ten sam wzorzec co odnotowany 2026-07-06 ("tytuł ≠ SQL"); (b) wykres
+liniowy z 15 nakładającymi się seriami (produkty) — zły wybór typu wykresu dla tej liczby
+kategorii, przykład do punktu promotora o dobrych praktykach wizualizacji.
+
+### J4 — Trend i filtr dat na scalonej bazie
+Cel: `miesięczny trend zamówień w 2024 roku`
+- [ ] Widget **Zakres dat** obecny, filtruje po `data_zamowienia`
+- [ ] Trend faktycznie ograniczony do danych z 2024 (baza zawiera też 2025)
+
+### J5 — Kontrola wsteczna: pojedynczy plik nadal działa jak dawniej
+Cel testu: multi-upload nie zepsuł dotychczasowego zachowania dla 1 pliku.
+1. Wgrać samodzielnie tylko `sklep_produkty.xlsx`, bez podawania nazwy bazy
+- [ ] Nazwa bazy w liście = nazwa pliku (jak przed zmianą), tabela `produkty`
+  BEZ prefiksu z nazwą pliku
+
+---
+
 ## Dane rejestrowane przy każdym teście
 1. Liczba **automatycznych korekt SQL** (wskaźnik nad dashboardem) — do statystyk rozdziału Ewaluacja
 2. Orientacyjny czas generowania (krótki / ok. 1 min / długi)

@@ -21,7 +21,7 @@ CSV = b"produkt,miasto,ilosc\nLaptop,Krakow,3\nMysz,Gdansk,7\n"
 @pytest.fixture(scope="module")
 def db_of_a(user_a):
     """Wgrywa małą bazę CSV na konto użytkownika A. Zwraca (db_id, file_path)."""
-    files = {"file": ("iso_test_a.csv", io.BytesIO(CSV), "text/csv")}
+    files = {"files": ("iso_test_a.csv", io.BytesIO(CSV), "text/csv")}
     r = requests.post(f"{BASE_URL}/upload",
                       data={"user_id": user_a["id"]}, files=files,
                       headers=auth(user_a["token"]), timeout=TIMEOUT)

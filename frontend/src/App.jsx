@@ -7,6 +7,15 @@ function authHeaders() {
   return token ? { "Authorization": `Bearer ${token}` } : {};
 }
 
+function parsePromptParts(promptText) {
+  // _full_prompt (backend) zapisuje "Cel: ...\nOpis: ...\nUklad: ..." — rozbijamy z powrotem
+  // na czesci do wyswietlenia (Opis bywa dlugi, wiec chowamy go za przyciskiem rozwijania).
+  const cel = /Cel: ([\s\S]*?)(?:\nOpis: |\nUklad: |$)/.exec(promptText)?.[1]?.trim() || promptText;
+  const opis = /Opis: ([\s\S]*?)(?:\nUklad: |$)/.exec(promptText)?.[1]?.trim() || "";
+  const uklad = /Uklad: ([\s\S]*)$/.exec(promptText)?.[1]?.trim() || "";
+  return { cel, opis, uklad };
+}
+
 function buildSchemaText(schema) {
   return Object.entries(schema)
     .map(([table, cols]) => {
@@ -28,9 +37,11 @@ export default function App() {
   const [activeTab, setActiveTab]   = useState("kreator");
   const [databases, setDatabases]   = useState([]);
   const [selectedDbId, setSelectedDbId] = useState("");
-  const [uploadFile, setUploadFile] = useState(null);
+  const [uploadFiles, setUploadFiles] = useState([]);
+  const [uploadDbName, setUploadDbName] = useState("");
   const [isUploading, setIsUploading] = useState(false);
   const [history, setHistory]       = useState([]);
+  const [expandedHistDesc, setExpandedHistDesc] = useState(new Set());
 
   const [description, setDescription]         = useState("");
   const [isGeneratingDesc, setIsGeneratingDesc] = useState(false);
@@ -240,17 +251,41 @@ export default function App() {
     } catch { alert("Błąd podczas usuwania."); }
   };
 
+  const handleDeleteQuery = async (queryId) => {
+    if (!confirm("Usunąć ten wpis historii? Tej operacji nie można cofnąć.")) return;
+    try {
+      await fetch(`${API_URL}/queries/${queryId}`, { method: "DELETE", headers: authHeaders() });
+      fetchHistory(user.id);
+    } catch { alert("Błąd podczas usuwania."); }
+  };
+
+  const toggleHistDesc = (id) => {
+    setExpandedHistDesc(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
   const handleFileUpload = async (e) => {
     e.preventDefault();
-    if (!uploadFile) return alert("Wybierz plik .db");
+    if (uploadFiles.length === 0) return alert("Wybierz co najmniej jeden plik.");
+    if (uploadFiles.length > 1 && !uploadDbName.trim()) {
+      return alert("Podaj nazwę bazy — jest wymagana, gdy łączysz kilka plików naraz.");
+    }
     setIsUploading(true);
     const fd = new FormData();
     fd.append("user_id", user.id);
-    fd.append("file", uploadFile);
+    uploadFiles.forEach(f => fd.append("files", f));
+    if (uploadDbName.trim()) fd.append("db_name", uploadDbName.trim());
     try {
       const res = await fetch(`${API_URL}/upload`, { method: "POST", body: fd, headers: authHeaders() });
-      if (res.ok) { alert("Baza wgrana pomyślnie."); setUploadFile(null); fetchDatabases(user.id); }
-      else alert("Błąd podczas wgrywania.");
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        alert("Baza wgrana pomyślnie.");
+        setUploadFiles([]); setUploadDbName("");
+        fetchDatabases(user.id);
+      } else alert(data.detail || "Błąd podczas wgrywania.");
     } catch { alert("Błąd komunikacji z serwerem."); }
     setIsUploading(false);
   };
@@ -394,10 +429,13 @@ export default function App() {
                         }}
                         className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500">
                         {databases.length === 0
-                          ? <option>Brak baz — wgraj plik .db</option>
+                          ? <option>Brak baz — wgraj plik w zakładce "Bazy danych"</option>
                           : databases.map(db => <option key={db.id} value={db.id}>{db.name}</option>)
                         }
                       </select>
+                      <p className="text-xs text-gray-400 mt-1">
+                        Baza, na której AI wygeneruje dashboard — wybierz z wcześniej wgranych.
+                      </p>
                       {/* Ściąga schematu */}
                       {selectedDbId && databases.find(d => d.id == selectedDbId)?.schema && (
                         <div className="mt-1.5">
@@ -432,6 +470,7 @@ export default function App() {
                         className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
                       <div className="mt-1.5 flex items-center gap-2">
                         <button type="button" onClick={startEnhance}
+                          title="AI doprecyzuje treść celu (np. doda brakujące szczegóły) — może najpierw dopytać, jeśli cel jest niejasny."
                           disabled={isEnhancing || isClarifying || !goal.trim()}
                           className="text-xs bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white font-semibold px-3 py-1.5 rounded-lg transition flex items-center gap-1.5">
                           {(isEnhancing || isClarifying) ? (
@@ -519,6 +558,7 @@ export default function App() {
                   <div>
                     <div className="flex items-center justify-between mb-1">
                       <button type="button" onClick={() => setShowDesc(v => !v)}
+                        title="Opcjonalny opis znaczenia tabel/kolumn — pomaga AI trafniej dobrać wykresy. Można go wygenerować automatycznie lub napisać ręcznie."
                         className="text-xs font-semibold text-gray-600 uppercase tracking-wide hover:text-blue-600 transition">
                         {showDesc ? "▲" : "▼"} Opis bazy danych
                         {!showDesc && description && <span className="text-green-600 normal-case font-normal"> (wypełniony)</span>}
@@ -653,19 +693,35 @@ export default function App() {
             <h2 className="text-xl font-bold text-gray-900 mb-6">Bazy danych</h2>
 
             <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
-              <h3 className="text-sm font-semibold text-gray-700 mb-3">Wgraj nową bazę SQLite (.db)</h3>
-              <form onSubmit={handleFileUpload} className="flex gap-3 items-center">
-                <input type="file" accept=".db,.sqlite,.sqlite3,.csv,.xlsx,.xls" onChange={e => setUploadFile(e.target.files[0])}
+              <h3 className="text-sm font-semibold text-gray-700 mb-1">Wgraj bazę danych (SQLite, CSV, Excel)</h3>
+              <p className="text-xs text-gray-400 mb-3">
+                Możesz wybrać kilka plików naraz (np. kilka arkuszy Excel), żeby połączyć je w jedną bazę —
+                wtedy podaj też nazwę bazy.
+              </p>
+              <form onSubmit={handleFileUpload} className="flex flex-col gap-3">
+                <input type="file" multiple accept=".db,.sqlite,.sqlite3,.csv,.xlsx,.xls"
+                  onChange={e => setUploadFiles(Array.from(e.target.files))}
                   className="border border-gray-200 rounded-lg p-2 text-sm w-full bg-gray-50" />
-                <button type="submit" disabled={isUploading}
-                  className="shrink-0 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-semibold disabled:opacity-40 transition">
-                  {isUploading ? "Wgrywanie..." : "Wgraj"}
-                </button>
+                {uploadFiles.length > 1 && (
+                  <input type="text" placeholder="Nazwa bazy (wymagana przy kilku plikach)"
+                    value={uploadDbName} onChange={e => setUploadDbName(e.target.value)}
+                    className="border border-gray-200 rounded-lg p-2 text-sm w-full bg-gray-50" />
+                )}
+                <div className="flex justify-end">
+                  <button type="submit" disabled={isUploading}
+                    className="shrink-0 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-semibold disabled:opacity-40 transition">
+                    {isUploading ? "Wgrywanie..." : "Wgraj"}
+                  </button>
+                </div>
               </form>
             </div>
 
             <div className="bg-white rounded-xl border border-gray-200 p-6">
-              <h3 className="text-sm font-semibold text-gray-700 mb-3">Zarejestrowane bazy</h3>
+              <h3 className="text-sm font-semibold text-gray-700 mb-1">Zarejestrowane bazy</h3>
+              <p className="text-xs text-gray-400 mb-3">
+                Twoje wgrane bazy — wybierz jedną z nich w zakładce "Kreator", żeby wygenerować dashboard.
+                Usunięcie tu jest trwałe i kasuje też powiązaną historię zapytań.
+              </p>
               {databases.length === 0
                 ? <p className="text-sm text-gray-400">Brak wgranych baz danych.</p>
                 : (
@@ -694,41 +750,80 @@ export default function App() {
         {/* ── HISTORIA ─────────────────────────────────────────────────────── */}
         {activeTab === "historia" && (
           <div className="p-8 max-w-3xl mx-auto">
-            <h2 className="text-xl font-bold text-gray-900 mb-6">Historia zapytań</h2>
+            <h2 className="text-xl font-bold text-gray-900 mb-1">Historia zapytań</h2>
+            <p className="text-xs text-gray-400 mb-6">
+              Ostatnie 20 wygenerowanych dashboardów (i próby, które się nie udały) — z bazą, celem i wygenerowanym SQL.
+            </p>
             <div className="bg-white rounded-xl border border-gray-200 p-6">
               {history.length === 0
                 ? <p className="text-sm text-gray-400">Brak historii zapytań.</p>
                 : (
                   <div className="space-y-4">
-                    {history.map(item => (
-                      <div key={item.id} className="border border-gray-100 rounded-xl p-4">
-                        <div className="flex justify-between items-start mb-2">
-                          <p className="text-sm font-semibold text-gray-800 whitespace-pre-line">{item.prompt}</p>
-                          <span className={`text-xs px-2 py-0.5 rounded-full font-bold ml-3 shrink-0
-                            ${item.status === "success" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
-                            {item.status.toUpperCase()}
-                          </span>
+                    {history.map(item => {
+                      const { cel, opis, uklad } = parsePromptParts(item.prompt);
+                      const descOpen = expandedHistDesc.has(item.id);
+                      return (
+                        <div key={item.id} className="border border-gray-100 rounded-xl p-4">
+                          <div className="flex justify-between items-start mb-1.5">
+                            <p className="text-sm font-semibold text-gray-800 whitespace-pre-line">{cel}</p>
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-bold ml-3 shrink-0
+                              ${item.status === "success" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+                              {item.status.toUpperCase()}
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mb-2 text-xs text-gray-400">
+                            {item.created_at && (
+                              <span>{new Date(item.created_at).toLocaleString("pl-PL")}</span>
+                            )}
+                            {item.database_name && (
+                              <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-medium">
+                                {item.database_name}
+                              </span>
+                            )}
+                            {uklad && (
+                              <span className="bg-blue-50 text-blue-600 px-2 py-0.5 rounded font-medium">
+                                Układ: {uklad}
+                              </span>
+                            )}
+                            {opis && (
+                              <button type="button" onClick={() => toggleHistDesc(item.id)}
+                                className="text-blue-600 hover:underline font-medium">
+                                {descOpen ? "▲ Ukryj opis bazy" : "▼ Pokaż opis bazy"}
+                              </button>
+                            )}
+                          </div>
+                          {descOpen && opis && (
+                            <p className="text-xs text-gray-500 bg-gray-50 border border-gray-100 rounded-lg p-2 mb-2 whitespace-pre-line">
+                              {opis}
+                            </p>
+                          )}
+                          {(() => {
+                            try {
+                              const d = JSON.parse(item.sql || "{}");
+                              if (d.dashboard_url) return (
+                                <a href={d.dashboard_url} target="_blank" rel="noopener noreferrer"
+                                  className="inline-block mb-2 text-xs text-blue-600 hover:underline font-medium">
+                                  Otwórz dashboard →
+                                </a>
+                              );
+                            } catch {}
+                            return null;
+                          })()}
+                          <pre className="bg-gray-50 border border-gray-100 rounded-lg p-3 text-xs text-gray-500 overflow-x-auto whitespace-pre-wrap max-h-32">
+                            {item.sql || "Brak SQL"}
+                          </pre>
+                          <div className="flex items-center justify-between mt-2">
+                            <p className="text-xs text-gray-400">
+                              Auto-korekty: {item.retry_count} · ID: {item.id}
+                            </p>
+                            <button onClick={() => handleDeleteQuery(item.id)}
+                              className="text-xs text-red-400 hover:text-red-600 hover:bg-red-50 px-2 py-1 rounded transition">
+                              Usuń
+                            </button>
+                          </div>
                         </div>
-                        {(() => {
-                          try {
-                            const d = JSON.parse(item.sql || "{}");
-                            if (d.dashboard_url) return (
-                              <a href={d.dashboard_url} target="_blank" rel="noopener noreferrer"
-                                className="inline-block mb-2 text-xs text-blue-600 hover:underline font-medium">
-                                Otwórz dashboard →
-                              </a>
-                            );
-                          } catch {}
-                          return null;
-                        })()}
-                        <pre className="bg-gray-50 border border-gray-100 rounded-lg p-3 text-xs text-gray-500 overflow-x-auto whitespace-pre-wrap max-h-32">
-                          {item.sql || "Brak SQL"}
-                        </pre>
-                        <p className="text-xs text-gray-400 mt-2 text-right">
-                          Auto-korekty: {item.retry_count} · ID: {item.id}
-                        </p>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
             </div>

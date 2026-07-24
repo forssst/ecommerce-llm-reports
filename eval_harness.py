@@ -86,7 +86,7 @@ def _upload(token, user_id, path):
     name = os.path.basename(path)
     with open(path, "rb") as f:
         content = f.read()
-    files = {"file": (name, io.BytesIO(content), "application/octet-stream")}
+    files = {"files": (name, io.BytesIO(content), "application/octet-stream")}
     r = requests.post(f"{BASE_URL}/upload", data={"user_id": user_id}, files=files,
                       headers={"Authorization": f"Bearer {token}"}, timeout=300)
     r.raise_for_status()

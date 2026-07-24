@@ -46,7 +46,7 @@ def _register_and_upload():
 
     with open(CSV_PATH, "rb") as f:
         content = f.read()
-    files = {"file": ("sklep_testowy.csv", io.BytesIO(content), "text/csv")}
+    files = {"files": ("sklep_testowy.csv", io.BytesIO(content), "text/csv")}
     r = requests.post(f"{BASE_URL}/upload", data={"user_id": user["id"]},
                       files=files, headers=headers, timeout=60)
     r.raise_for_status()

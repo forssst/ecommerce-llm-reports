@@ -7,7 +7,7 @@ import shutil
 import json
 from decimal import Decimal
 from string import Formatter
-from typing import Optional
+from typing import List, Optional
 from datetime import datetime, date, timezone, timedelta
 
 import psycopg2
@@ -1158,63 +1158,87 @@ MAX_UPLOAD_BYTES = 150 * 1024 * 1024  # 150 MB (olist.sqlite z testow ma ~111MB)
 
 
 @app.post("/upload")
-async def upload_database(user_id: int = Form(...), file: UploadFile = File(...),
+async def upload_database(user_id: int = Form(...), files: List[UploadFile] = File(...),
+                          db_name: Optional[str] = Form(None),
                           db: Session = Depends(database.get_db),
                           token_user_id: int = Depends(verify_token)):
     user_id = token_user_id  # nie ufaj user_id z formularza — właścicielem jest zalogowany user
-    orig_name = os.path.basename(file.filename or "upload")
-    ext = os.path.splitext(orig_name)[1].lower()
-    # nazwa pliku na dysku NIE pochodzi od użytkownika (path traversal) — losowy identyfikator
-    tmp_path = f"/tmp/_upload_{uuid.uuid4().hex}{ext}"
+    db_name = (db_name or "").strip()
+    if len(files) > 1 and not db_name:
+        raise HTTPException(
+            status_code=400,
+            detail="Podaj nazwę bazy przy wgrywaniu kilku plików naraz.")
 
-    size = 0
-    with open(tmp_path, "wb") as buf:
-        while True:
-            chunk = await file.read(1024 * 1024)
-            if not chunk:
-                break
-            size += len(chunk)
-            if size > MAX_UPLOAD_BYTES:
-                buf.close()
-                os.remove(tmp_path)
-                raise HTTPException(
-                    status_code=413,
-                    detail=f"Plik za duży — limit {MAX_UPLOAD_BYTES // (1024 * 1024)} MB")
-            buf.write(chunk)
+    orig_name = os.path.basename(files[0].filename or "upload")  # fallback nazwy gdy 1 plik bez db_name
+    all_dfs: dict = {}
+    for f in files:
+        file_orig_name = os.path.basename(f.filename or "upload")
+        ext = os.path.splitext(file_orig_name)[1].lower()
+        # nazwa pliku na dysku NIE pochodzi od użytkownika (path traversal) — losowy identyfikator
+        tmp_path = f"/tmp/_upload_{uuid.uuid4().hex}{ext}"
 
-    # Wczytaj wszystkie tabele do słownika DataFrame-ów
-    dfs: dict = {}
-    try:
-        if ext in (".db", ".sqlite", ".sqlite3"):
-            sq = sqlite3.connect(tmp_path)
-            try:
-                cur = sq.cursor()
-                cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
-                for (tname,) in cur.fetchall():
-                    dfs[tname] = pd.read_sql(f'SELECT * FROM "{tname}"', sq)
-            finally:
-                sq.close()
-        elif ext == ".csv":
-            stem = re.sub(r"[^\w]", "_", os.path.splitext(orig_name)[0])
-            dfs[stem] = pd.read_csv(tmp_path, encoding="utf-8-sig")
-        elif ext in (".xlsx", ".xls"):
-            xls = pd.ExcelFile(tmp_path)
-            for sheet in xls.sheet_names:
-                tname = re.sub(r"[^\w]", "_", sheet).strip("_").lower() or "sheet"
-                dfs[tname] = pd.read_excel(xls, sheet_name=sheet)
-        else:
-            raise HTTPException(status_code=400, detail="Nieobsługiwany format pliku.")
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Nie udało się odczytać pliku: {e}")
-    finally:
-        os.remove(tmp_path)
+        size = 0
+        with open(tmp_path, "wb") as buf:
+            while True:
+                chunk = await f.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > MAX_UPLOAD_BYTES:
+                    buf.close()
+                    os.remove(tmp_path)
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Plik za duży — limit {MAX_UPLOAD_BYTES // (1024 * 1024)} MB")
+                buf.write(chunk)
 
+        # Wczytaj wszystkie tabele tego pliku do słownika DataFrame-ów
+        dfs: dict = {}
+        try:
+            if ext in (".db", ".sqlite", ".sqlite3"):
+                sq = sqlite3.connect(tmp_path)
+                try:
+                    cur = sq.cursor()
+                    cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                    for (tname,) in cur.fetchall():
+                        dfs[tname] = pd.read_sql(f'SELECT * FROM "{tname}"', sq)
+                finally:
+                    sq.close()
+            elif ext == ".csv":
+                stem = re.sub(r"[^\w]", "_", os.path.splitext(file_orig_name)[0])
+                dfs[stem] = pd.read_csv(tmp_path, encoding="utf-8-sig")
+            elif ext in (".xlsx", ".xls"):
+                xls = pd.ExcelFile(tmp_path)
+                for sheet in xls.sheet_names:
+                    tname = re.sub(r"[^\w]", "_", sheet).strip("_").lower() or "sheet"
+                    dfs[tname] = pd.read_excel(xls, sheet_name=sheet)
+            else:
+                raise HTTPException(status_code=400, detail="Nieobsługiwany format pliku.")
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Nie udało się odczytać pliku: {e}")
+        finally:
+            os.remove(tmp_path)
+
+        # Scal do wspólnego słownika. Przy >1 pliku prefiksujemy nazwą źródłowego pliku,
+        # żeby dwa pliki z tabelą/arkuszem o tej samej nazwie (np. dwa "Sheet1") się nie nadpisały.
+        file_stem = re.sub(r"[^\w]", "_", os.path.splitext(file_orig_name)[0]).strip("_").lower() or "plik"
+        for tname, tdf in dfs.items():
+            key = tname if len(files) == 1 else f"{file_stem}__{tname}"
+            if key in all_dfs:
+                suffix = 2
+                while f"{key}_{suffix}" in all_dfs:
+                    suffix += 1
+                key = f"{key}_{suffix}"
+            all_dfs[key] = tdf
+
+    dfs = all_dfs
     if not dfs:
         raise HTTPException(status_code=400, detail="Plik nie zawiera żadnych danych.")
 
-    schema_name = _sanitize_schema(user_id, orig_name)
+    display_name = db_name or orig_name
+    schema_name = _sanitize_schema(user_id, display_name)
 
     # Załaduj do PostgreSQL (usuń stary schemat jeśli istnieje)
     from sqlalchemy import create_engine, text as sa_text
@@ -1272,11 +1296,11 @@ async def upload_database(user_id: int = Form(...), file: UploadFile = File(...)
     # kasowalo dane drugiemu (zaobserwowane: firma_uslugi x2, sakila x2).
     rec = db.query(models.Database).filter_by(user_id=user_id, file_path=schema_name).first()
     if rec:
-        rec.name = orig_name
+        rec.name = display_name
         rec.schema_json = compact_schema
         db.commit(); db.refresh(rec)
         return {"id": rec.id, "name": rec.name, "message": "Baza zaktualizowana (nadpisano poprzednią wersję)."}
-    rec = models.Database(user_id=user_id, name=orig_name,
+    rec = models.Database(user_id=user_id, name=display_name,
                           file_path=schema_name, schema_json=compact_schema)
     db.add(rec); db.commit(); db.refresh(rec)
     return {"id": rec.id, "name": rec.name, "message": "Baza wgrana pomyślnie!"}
@@ -1337,7 +1361,21 @@ def get_user_queries(user_id: int, db: Session = Depends(database.get_db),
     rows = db.query(models.Query).filter_by(user_id=user_id).order_by(
         models.Query.created_at.desc()).limit(20).all()
     return [{"id": r.id, "prompt": r.prompt_nl, "sql": r.generated_sql,
-             "status": r.status, "retry_count": r.retry_count} for r in rows]
+             "status": r.status, "retry_count": r.retry_count,
+             "created_at": r.created_at.isoformat() if r.created_at else None,
+             "database_name": r.database.name if r.database else None} for r in rows]
+
+
+@app.delete("/queries/{query_id}")
+def delete_query(query_id: int, db: Session = Depends(database.get_db),
+                 token_user_id: int = Depends(verify_token)):
+    rec = db.query(models.Query).filter_by(id=query_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Wpis historii nie istnieje")
+    if rec.user_id != token_user_id:
+        raise HTTPException(status_code=403, detail="Brak dostępu do cudzych zasobów")
+    db.delete(rec); db.commit()
+    return {"message": "Usunięto"}
 
 
 N8N_ORCHESTRATOR_URL = os.getenv("N8N_ORCHESTRATOR_URL", "http://n8n_local:5678/webhook/create-dashboard")
