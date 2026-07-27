@@ -24,8 +24,16 @@ Kluczowe reguły i ich rodowody:
   nie ma się do czego podpiąć]
 - `{types_instruction}` — dynamiczna: gdy user wybrał typy, wstrzykiwane jest
   „UZYTKOWNIK ZADA DOKLADNIE N WYKRESOW W TEJ KOLEJNOSCI: (1) chart_type=bar..."
-  (budowane w `/internal/plan-prompt` z `_parse_requested_charts`); bez wyboru:
-  „Wygeneruj 3-4 roznorodne wykresy".
+  (budowane w `/internal/plan-prompt` z `_parse_requested_charts`); bez wyboru
+  (2026-07-24, było „Wygeneruj 3-4 roznorodne wykresy (bar, line, pie, table)"
+  [→ punkt 6 promotora: 12/13 dashboardów 3-wykresowych miało DOKŁADNIE zestaw
+  {bar, line, pie} niezależnie od treści promptu — instrukcja kazała być
+  „różnorodnym", nie dobierać formy do treści, patrz `docs/09` §6]) — teraz
+  jawne kryterium per pod-cel: trend→line, ranking/TOP N→bar, udział ≤5-6
+  kategorii→pie, zestawienie szczegółowe→table, przy niepewności pie/bar→bar.
+  Zweryfikowane, że model już NIE dociąga sztucznie trzeciego/innego typu gdy
+  nie ma po temu podstawy (dwa pod-cele rankingowe → `bar`+`bar`, nie
+  `bar`+`pie`).
 - Wyjście wymuszone: `{"charts":[{"title","chart_type","goal"}]}` — dzięki
   `format:"json"` w wywołaniu Ollamy (ścieżka SQL) / zdejmowaniu fence'ów
   (natywny LLM Chain w planie).

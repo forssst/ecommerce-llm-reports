@@ -123,11 +123,26 @@ Promotor zapytał, czy dobór typów i układu wykresów jest zgodny z dobrymi p
 wizualizacji danych — nie tylko „czy działa technicznie". Metoda: przegląd 30 kart
 typu pie/line z 20 ostatnio wygenerowanych dashboardów (Metabase API, `/api/dashboard/{id}`
 + `/api/card/{id}/query` — pobrane bezpośrednio wyniki zapytań, nie tylko definicje kart)
-wobec ogólnie przyjętych zasad doboru formy wykresu: *magnitude/porównanie kategorii* →
-słupkowy, *identity/udział całości* → kołowy TYLKO dla nielicznych (≤5–6) kategorii,
-*zmiana w czasie* → liniowy/obszarowy, *pojedyncza wartość* → licznik; oraz anty-wzorca
-„przeciążona liczba serii/kategorii" (>8–10 elementów na wykresie liniowym lub kołowym =
-nieczytelne — zamiast tego agregacja „Pozostałe", small multiples albo inna forma).
+wobec zasad doboru formy wykresu opartych na literaturze przedmiotu (bibliografia w
+`Teoria/PLAN_PRACY.md`):
+- **Cleveland W.S., McGill R., „Graphical Perception: Theory, Experimentation, and
+  Application to the Development of Graphical Methods", JASA, 1984** — empiryczny
+  eksperyment: ludzie oceniający proporcje z wykresu słupkowego robią to DOKŁADNIEJ niż
+  z kołowego (hierarchia kanałów percepcyjnych: pozycja > długość > kąt > pole). Podstawa
+  reguły „ranking/TOP N → słupkowy, nie kołowy".
+- **Few S., „Information Dashboard Design: The Effective Visual Communication of Data",
+  O'Reilly, 2006** — wprost odradza wykresy kołowe w dashboardach (razem z gauge/dial);
+  dokładnie ta sama teza co poniższe znaleziska z kart 132/377 i 143/406.
+- **Munzner T., „Visualization Analysis and Design", CRC Press** — rama „task and data
+  abstraction": *magnitude/porównanie kategorii* → słupkowy, *identity/udział całości*
+  → kołowy TYLKO dla nielicznych (≤5–6) kategorii, *zmiana w czasie* → liniowy/obszarowy,
+  *pojedyncza wartość* → licznik.
+
+Anty-wzorzec „przeciążona liczba serii/kategorii" (>8–10 elementów na wykresie liniowym
+lub kołowym = nieczytelne — zamiast tego agregacja „Pozostałe", small multiples albo inna
+forma) wynika wprost z powyższej hierarchii kanałów percepcyjnych Cleveland/McGill: powyżej
+kilku kategorii różnicowanie po kącie (pie) czy po kolorze linii (line) przestaje być
+rozróżnialne dla oka.
 
 ### Znalezione naruszenia (realne karty z wygenerowanych dashboardów)
 
@@ -189,6 +204,131 @@ Warto zaznaczyć: sam Metabase już CZĘŚCIOWO łagodzi ten problem po swojej s
 kategoria to nieinterpretowalny bucket „Other" (78%). Dlatego odpowiedzialność za sensowny
 próg kardynalności musiała leżeć wyżej, na etapie WALIDACJI SQL przed budową karty, nie na
 etapie renderowania — stąd guard w Pythonie (`process-sql-attempt`), nie w Metabase ani w JS.
+
+### Trzeci problem: dobór typu wykresu „dla różnorodności", nie po treści pytania
+
+Osobne pytanie niż kardynalność pojedynczego wykresu: czy sam ZESTAW 2–4 wykresów, jaki
+system dobiera do jednego promptu, odpowiada temu, co dobrałby profesjonalny analityk danych.
+Sprawdzone wprost w kodzie: instrukcja dla modelu na etapie planowania (gdy user NIE wybrał
+ręcznie typów w UI), przed poprawką, brzmiała dosłownie **„Wygeneruj 3-4 różnorodne wykresy
+(bar, line, pie, table)"** (`backend/main.py`, gałąź `else` w `internal_plan_prompt`) —
+żadnego powiązania między charakterem pod-celu a wyborem typu, poza jednym twardym warunkiem
+(cel zawiera „trend/miesiąc/rok" → musi być line/bar).
+
+**Dowód empiryczny (nie teoria):** na tych samych 20 dashboardach z sekcji wyżej, **12 z 13
+dashboardów 3-wykresowych miało DOKŁADNIE zestaw {bar, line, pie}** — po jednym z każdego,
+niezależnie od treści promptu. Typ `table`, mimo że dozwolony, nie pojawił się ani razu w tej
+próbce. To wygląda jak sztywny szablon „1 słupkowy + 1 liniowy + 1 kołowy" motywowany
+instrukcją „bądź różnorodny", nie realną analizą treści każdego pod-celu — czyli coś, czego
+profesjonalny analityk by NIE zrobił (dobiera formę wyłącznie po naturze pytania: trend→line,
+ranking→bar, udział nielicznych kategorii→pie — nigdy „żeby było inaczej niż poprzedni wykres").
+
+**Naprawione (2026-07-24):** instrukcja `types_instruction` w gałęzi swobodnego wyboru
+zamieniona z „wygeneruj różnorodne" na jawne kryteria dopasowania typu do treści pod-celu
+(oparte na tych samych źródłach co wyżej — Cleveland/McGill, Few, Munzner), z regułą
+awaryjną „gdy wahasz się między pie a bar — wybierz bar". **Zweryfikowane na dwóch
+kontrastowych promptach przez pełny łańcuch `plan-prompt` → Ollama:**
+- prompt z 3 różnymi rodzajami pod-celów (ranking + trend + udział 3 segmentów) → model
+  poprawnie zwrócił `bar` + `line` + `pie` — ale tym razem dlatego, że KAŻDY pod-cel
+  faktycznie tego wymagał, nie z automatu;
+- prompt z DWOMA rankingami i zerem trendu/udziału („top 5 produktów" + „top 5 klientów")
+  → model zwrócił `bar` + `bar`, **bez sztucznego dociągania trzeciego, innego typu**. To
+  jest rozstrzygający test: stary automatyzm wymuszałby różnorodność, nowa instrukcja
+  poprawnie rozpoznaje, że oba pod-cele to ten sam rodzaj zadania (ranking).
+- Ten sam drugi prompt puszczony przez PEŁNY pipeline (`/generate` → n8n → Metabase, nie
+  tylko izolowany krok planowania): dashboard 147, 2/2 karty, obie `bar`, 63,6 s.
+- Pełny pakiet testów regresyjnych po zmianie: **33 passed** (bez regresji — to zmiana
+  tekstu instrukcji, nie logiki walidacji).
+
+**Why to jest osobna klasa problemu:** guard kardynalności (wyżej) naprawia POJEDYNCZY
+wykres po tym, jak SQL już powstał. Ten problem jest o krok wcześniej — na etapie
+PLANOWANIA zestawu wykresów, zanim jakikolwiek SQL powstanie — więc nie da się go złapać
+guardem wykonującym zapytanie; jedyna dźwignia to sama treść promptu do modelu.
+
+### Czwarty problem: guard kardynalności naprawiał tylko objaw, nie typ wykresu
+
+Luka znaleziona przy przeglądzie guardu kardynalności (sekcja wyżej): gdy model mimo
+poprawki promptu i tak zwróci `pie` dla danych z >8 kategoriami, `_check_category_cardinality`
+zwracał błąd każący modelowi **poprawić SQL** (`LIMIT 8` albo agregacja do „Inne") — ale
+retry w pętli (`_generate_multichart` / `/internal/process-sql-attempt`, wołane przez węzeł
+n8n „Generuj SQL i Zbierz Wykresy") nigdy nie zmieniał samego `chart_type`, bo jest on
+ustalony raz na etapie planowania i przekazywany na sztywno przez wszystkie 3 próby. Skutek:
+jeśli model nie potrafił w 3 próbach obciąć wyniku do 8 kategorii (a nie zawsze to sensowne —
+czasem WSZYSTKIE 15 kategorii są ważne dla odpowiedzi na pytanie), wykres był **całkowicie
+porzucany** (`continue` po wyczerpaniu prób) — gorszy wynik niż pokazanie tych samych danych
+jako słupkowy, co i tak byłoby poprawną formą dla tylu kategorii (ten sam Cleveland/McGill
+co uzasadnia regułę „ranking → bar" wyżej).
+
+**Naprawione (2026-07-24):** `_run_and_validate` (backend/main.py) zwraca teraz piąty element —
+rozwiązany `chart_type` — i gdy guard kardynalności odrzuca `pie`, zamiast błędu zwraca
+deterministycznie `ok=True, chart_type="bar"` (dla `pie` bez dalszych prób SQL, O ILE słupkowy
+z tymi samymi danymi sam przejdzie swój limit — patrz „Piąty problem" niżej, gdzie okazało się,
+że `bar` też potrzebuje granicy, tylko wyższej). Zmiana objęła 3
+miejsca: samą funkcję, wywołanie w `_generate_multichart` (kod referencyjny, nieużywany w
+tej gałęzi) i żywy endpoint `/internal/process-sql-attempt`, którego JSON teraz zwraca
+`chart_type` obok `ok/sql/error/columns/sample` — węzeł n8n „Generuj SQL i Zbierz Wykresy"
+(`n8n_orchestrator_workflow.json`) zaktualizowany, by przekazywał ten ROZWIĄZANY typ (nie
+oryginalny `spec.chart_type` z planu) do `/internal/finalize-chart`, inaczej poprawka nie
+miałaby efektu na finalnej karcie w Metabase. Guard dla `line` (za dużo serii) celowo
+zostawiony bez zmian — 3-kolumnowy wynik liniowy (data + seria + miara) nie da się bez
+przekształcenia SQL pokazać jako `bar` 1:1, więc tam retry na SQL wciąż jest właściwą reakcją.
+
+**Zweryfikowane bezpośrednio na żywym endpoincie** (`u2_superstore`, tabela `orders`):
+- `SELECT sub_category, SUM(sales) FROM orders GROUP BY sub_category` (17 kategorii) z
+  `chart_type=pie` → odpowiedź `{"ok": true, "chart_type": "bar", ...}` — dawniej `ok=false`
+  z błędem kardynalności;
+- kontrolnie to samo z `segment` (3 kategorie) i `chart_type=pie` → `{"ok": true,
+  "chart_type": "pie", ...}` bez zmian — potwierdza, że fallback uruchamia się TYLKO przy
+  realnym przekroczeniu limitu, nie zawsze.
+
+### Piąty problem: słupkowy też może mieć za dużo kategorii — znalezione przez usera, nie przeze mnie
+
+Poprawka wyżej (pie→bar) milcząco zakładała, że `bar` w ogóle nie ma problemu z kardynalnością.
+**To założenie obalił bezpośrednio ręczny test usera** (nie test automatyczny) w tej samej
+sesji: prompt „Pokaż ranking najlepiej sprzedających się produktów oraz ranking najlepszych
+klientów..." na bazie `sklep_testowy.csv`, BEZ ręcznego wyboru typu wykresu (AI miało dobrać
+samo) → karta „Ranking najlepiej sprzedających się produktów" wyrenderowała się jako słupkowy
+z kilkudziesięcioma cieniutkimi słupkami malejącymi od ~270 000 do blisko zera — nieczytelny,
+bo prompt nie zawierał słowa „top N", więc istniejący guard „`top N` w celu → dołóż `LIMIT`"
+(`/internal/process-sql-attempt`) się nie uruchomił, a `_check_category_cardinality` w ogóle
+nie obejmował `bar` (`_CARDINALITY_LIMITED_TYPES = {"pie", "line"}`). Kontrastowo: ten sam
+rodzaj promptu na bazie „Sklepik" (mniej produktów) dał czytelny wynik (10 i 5 słupków) — czyli
+błąd ujawnia się tylko przy realnie dużej liczbie kategorii, nie zawsze, co dokładnie pasuje do
+klasy problemu „brak górnej granicy", a nie „zawsze się psuje".
+
+**Naprawione (2026-07-24):** `bar` dołączony do `_CARDINALITY_LIMITED_TYPES`, ale z WŁASNYM,
+wyższym limitem niż pie/line — `_MAX_BAR_CARDINALITY = 20` vs `_MAX_CATEGORY_CARDINALITY = 8` —
+bo słupkowy toleruje więcej kategorii niż kołowy (Cleveland/McGill: pozycja/długość czytelniejsza
+niż kąt), ale nie bez granic, co właśnie pokazał ten test. Dodatkowo wyjątek: gdy pierwsza
+kolumna wygląda jak data (`^\d{4}-\d{2}(-\d{2})?$`, ta sama heurystyka co w `_infer_display`),
+check jest pomijany całkowicie — słupkowy „sprzedaż po miesiącach" z 24 punktami (2 lata) to
+naturalna liczba okresów czasu, nie ranking kategorii do obcinania, i nie powinien być fałszywie
+łapany. Konsekwencja dla wcześniejszej poprawki (pie→bar): skoro `bar` ma teraz własny limit,
+konwersja pie→bar sprawdza NAJPIERW, czy słupkowy z tymi samymi danymi sam przejdzie swój
+(wyższy) limit — jeśli tak, konwertuje; jeśli nawet jako słupkowy byłoby za dużo kategorii
+(np. 1849 unikalnych nazw produktów), fallback się NIE uruchamia i błąd wraca do modelu jak
+dawniej, żeby SQL rzeczywiście ograniczył wynik, zamiast podać nieczytelny wykres jako „ok".
+
+**Zweryfikowane bezpośrednio na żywym endpoincie**, odtwarzając dokładnie przypadek z testu
+usera (`u2_superstore.orders`, 1849 unikalnych `product_name`):
+- `bar` + `GROUP BY product_name` (1849 kategorii) → `ok=false`, błąd z podpowiedzią
+  `LIMIT 20` / agregacja do „Inne" — dokładnie to, czego brakowało w oryginalnym znalezisku;
+- kontrolnie `bar` + `GROUP BY segment` (5 kategorii) → `ok=true`, bez zmian;
+- kontrolnie `bar` + `GROUP BY miesiąc` (etykieta w formacie `YYYY-MM`) → `ok=true` mimo
+  wielu punktów — wyjątek daty działa, nie blokuje normalnego trendu miesięcznego pokazanego
+  jako słupkowy;
+- kontrolnie `pie` + `GROUP BY sub_category` (17 kategorii) → nadal konwertuje na
+  `chart_type="bar"` (17 ≤ 20, przechodzi);
+- **rozstrzygający test spójności:** `pie` + `GROUP BY product_name` (1849 kategorii) →
+  `ok=false`, ZOSTAJE `pie` (fallback się NIE uruchamia, bo 1849 > 20 też dla słupkowego) —
+  potwierdza, że nowa poprawka nie tworzy fałszywego poczucia bezpieczeństwa przy naprawdę
+  dużej kardynalności, tam gdzie żaden typ wykresu tego nie uratuje bez realnego ograniczenia
+  SQL. Pełny pakiet testów regresyjnych po zmianie: bez regresji (patrz historia commitów).
+
+**Why to jest dobry materiał na obronę:** to jedyne z pięciu znalezisk w tym rozdziale, które
+NIE wyszło z mojego przeglądu kart Metabase, tylko z samodzielnego, naiwnego testowania przez
+usera jako zwykłego użytkownika (bez wiedzy, co system powinien czy nie powinien zrobić) —
+dokładnie to, o co prosił promotor w metazadaniu „przejdź aplikację od zera".
 
 ## 7. Jak te poziomy się uzupełniają (na obronę)
 

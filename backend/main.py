@@ -518,24 +518,40 @@ def _check_has_metric(cols, sample, chart_type=None):
     )
 
 
-_CARDINALITY_LIMITED_TYPES = {"pie", "line"}
+_CARDINALITY_LIMITED_TYPES = {"pie", "line", "bar"}
 _MAX_CATEGORY_CARDINALITY = 8
+# Słupkowy znosi więcej kategorii niż kołowy/liniowy — dyskryminacja po pozycji/długości
+# (Cleveland/McGill) jest czytelna dłużej niż po kącie/kolorze linii — ale nie bez granic:
+# realny test (dashboard usera, "ranking produktów" bez podanego N) pokazał kilkadziesiąt
+# cieniutkich, nieczytelnych słupków, bo nic wczesniej tego nie ograniczało.
+_MAX_BAR_CARDINALITY = 20
+_DATE_LABEL_RE = re.compile(r"^\d{4}-\d{2}(-\d{2})?$")
 
 
-def _check_category_cardinality(cur, sql, cols, chart_type=None, limit=_MAX_CATEGORY_CARDINALITY):
-    """Kołowy z >N kategoriami w kolumnie etykiety, albo liniowy z >N seriami (osobna
-    kolumna grupująca MIĘDZY osią X a miarą) — w obu przypadkach Metabase renderuje
-    nieczytelny wykres (linie nachodzące na siebie, albo pie zdominowany przez własny
-    fallback "Other"). Liczy DISTINCT na PEŁNYM wyniku przez podzapytanie — 5-wierszowa
-    próbka z _run_and_validate nigdy nie wystarczy do wykrycia kardynalności.
+def _check_category_cardinality(cur, sql, cols, sample=None, chart_type=None, limit=None):
+    """Kołowy/słupkowy z >N kategoriami w kolumnie etykiety, albo liniowy z >N seriami
+    (osobna kolumna grupująca MIĘDZY osią X a miarą) — we wszystkich trzech przypadkach
+    Metabase renderuje nieczytelny wykres (linie/słupki nachodzące na siebie, albo pie
+    zdominowany przez własny fallback "Other"). Liczy DISTINCT na PEŁNYM wyniku przez
+    podzapytanie — 5-wierszowa próbka z _run_and_validate nigdy nie wystarczy do wykrycia
+    kardynalności.
     Dla "line" sprawdzamy TYLKO gdy są ≥3 kolumny (data + seria + miara) — zwykły
     jednoserowy trend (data + miara, 2 kolumny) ma prawo mieć 12-24 punktów w osi X,
-    to nie jest kardynalność kategorii."""
+    to nie jest kardynalność kategorii.
+    Dla "bar" limit jest WYŻSZY niż dla pie/line (patrz _MAX_BAR_CARDINALITY) i pomijamy
+    check całkowicie, gdy pierwsza kolumna to data (np. słupkowy 12-31 dni/miesięcy to
+    naturalna liczba okresów czasu, nie ranking kategorii do ograniczenia)."""
     if chart_type not in _CARDINALITY_LIMITED_TYPES or not cols:
         return None
     if chart_type == "line" and len(cols) < 3:
         return None
-    label_col = cols[0] if chart_type == "pie" else cols[1]
+    if limit is None:
+        limit = _MAX_BAR_CARDINALITY if chart_type == "bar" else _MAX_CATEGORY_CARDINALITY
+    if chart_type == "bar":
+        first_val = next((row[0] for row in (sample or []) if row and row[0] is not None), None)
+        if first_val is not None and _DATE_LABEL_RE.match(str(first_val)):
+            return None
+    label_col = cols[0] if chart_type in ("pie", "bar") else cols[1]
     try:
         cur.execute(
             pgsql.SQL("SELECT COUNT(DISTINCT {}) FROM ({}) AS _card_sub").format(
@@ -556,9 +572,15 @@ def _check_category_cardinality(cur, sql, cols, chart_type=None, limit=_MAX_CATE
 
 
 def _run_and_validate(schema_name, sql, chart_type=None):
-    """Sprawdza SQL na schemacie PostgreSQL i zwraca (ok, error, kolumny, próbka)."""
+    """Sprawdza SQL na schemacie PostgreSQL i zwraca (ok, error, kolumny, próbka, chart_type).
+    Ostatni element to typ wykresu DO UZYCIA DALEJ — zwykle ten sam co na wejsciu, ale patrz
+    nizej: kolowy z za duza kardynalnoscia jest deterministycznie zamieniany na slupkowy,
+    O ILE slupkowy z tymi samymi danymi SAM przejdzie swoj (wyzszy) limit kardynalnosci —
+    slupkowy nie zawsze ratuje sytuacje, bo tez ma teraz granice (patrz _MAX_BAR_CARDINALITY),
+    tylko wyzsza niz kolowy (Cleveland/McGill — pozycja/dlugosc czytelniejsza niz kat, ale
+    nie bez ograniczen — realny test pokazal kilkadziesiat nieczytelnych slupkow bez tego)."""
     if not schema_name:
-        return True, None, [], []
+        return True, None, [], [], chart_type
     try:
         # SQL pochodzi od LLM — wykonuj rola read-only, zeby DROP/DELETE/UPDATE
         # fizycznie nie mogly przejsc (obrona na poziomie uprawnien, nie parsowania).
@@ -567,24 +589,29 @@ def _run_and_validate(schema_name, sql, chart_type=None):
             cur.execute(sql)
             cols = [d[0] for d in cur.description] if cur.description else []
             sample = [list(r) for r in cur.fetchmany(5)]
-            card_err = _check_category_cardinality(cur, sql, cols, chart_type)
+            card_err = _check_category_cardinality(cur, sql, cols, sample, chart_type)
+            resolved_type = chart_type
+            if card_err and chart_type == "pie":
+                bar_err = _check_category_cardinality(cur, sql, cols, sample, "bar")
+                if not bar_err:
+                    card_err, resolved_type = None, "bar"
         conn.close()
-        label_err = _check_label_column(cols, sample, chart_type)
+        label_err = _check_label_column(cols, sample, resolved_type)
         if label_err:
-            return False, label_err, cols, sample
-        metric_err = _check_has_metric(cols, sample, chart_type)
+            return False, label_err, cols, sample, resolved_type
+        metric_err = _check_has_metric(cols, sample, resolved_type)
         if metric_err:
-            return False, metric_err, cols, sample
-        if chart_type == "smartscalar":
+            return False, metric_err, cols, sample, resolved_type
+        if resolved_type == "smartscalar":
             ss_err = _check_smartscalar_shape(cols, sample)
             if ss_err:
-                return False, ss_err, cols, sample
+                return False, ss_err, cols, sample, resolved_type
         if card_err:
-            return False, card_err, cols, sample
-        return True, None, cols, sample
+            return False, card_err, cols, sample, resolved_type
+        return True, None, cols, sample, resolved_type
     except Exception as e:
         enriched = _hint_missing_column(schema_name, str(e))
-        return False, enriched, [], []
+        return False, enriched, [], [], chart_type
 
 
 def _infer_display(columns, sample):
@@ -799,7 +826,19 @@ def _generate_multichart(g, db, db_id):
             + "\nMUSISZ wygenerowac DOKLADNIE tyle elementow i uzyc DOKLADNIE tych typow chart_type."
         )
     else:
-        types_instruction = "Wygeneruj 3-4 roznorodne wykresy (bar, line, pie, table)."
+        types_instruction = (
+            "Wygeneruj 2-4 wykresy. Dla KAZDEGO wykresu wybierz chart_type WYLACZNIE na "
+            "podstawie tego, co dany pod-cel ma pokazac — NIE po to, zeby dashboard "
+            "'wygladal roznorodnie'. Zasady wyboru:\n"
+            "- zmiana / trend w czasie (miesiac, rok, kwartal) -> chart_type: line\n"
+            "- ranking, TOP N, porownanie wielu kategorii miedzy soba -> chart_type: bar\n"
+            "- udzial / procent / rozklad calosci na kategorie, TYLKO gdy kategorii jest "
+            "MALO (do 5-6) -> chart_type: pie\n"
+            "- szczegolowe zestawienie / wiele kolumn na raz -> chart_type: table\n"
+            "Jesli wahasz sie miedzy pie a bar — wybierz bar (czytelny zawsze, pie tylko "
+            "przy nielicznych kategoriach). Typ KAZDEGO wykresu musi wynikac z natury "
+            "jego pod-celu, nie z checi pokazania roznych typow obok siebie."
+        )
 
     plan_prompt = PROMPTS["plan_prompt"].format(
         types_instruction=types_instruction,
@@ -870,7 +909,7 @@ def _generate_multichart(g, db, db_id):
                        "filtr calkowicie i pokaz PELNY zakres dat z tabeli, bez WHERE na kolumnie daty.")
                 total_retries += 1
                 continue
-            ok, verr, cols, sample = _run_and_validate(g.db_path, sql, ctype)
+            ok, verr, cols, sample, ctype = _run_and_validate(g.db_path, sql, ctype)
             if ok and sql:
                 break
             err = verr or "pusty SQL"; total_retries += 1
@@ -1543,7 +1582,19 @@ def internal_plan_prompt(body: InternalPlanPromptIn):
             + "\nMUSISZ wygenerowac DOKLADNIE tyle elementow i uzyc DOKLADNIE tych typow chart_type."
         )
     else:
-        types_instruction = "Wygeneruj 3-4 roznorodne wykresy (bar, line, pie, table)."
+        types_instruction = (
+            "Wygeneruj 2-4 wykresy. Dla KAZDEGO wykresu wybierz chart_type WYLACZNIE na "
+            "podstawie tego, co dany pod-cel ma pokazac — NIE po to, zeby dashboard "
+            "'wygladal roznorodnie'. Zasady wyboru:\n"
+            "- zmiana / trend w czasie (miesiac, rok, kwartal) -> chart_type: line\n"
+            "- ranking, TOP N, porownanie wielu kategorii miedzy soba -> chart_type: bar\n"
+            "- udzial / procent / rozklad calosci na kategorie, TYLKO gdy kategorii jest "
+            "MALO (do 5-6) -> chart_type: pie\n"
+            "- szczegolowe zestawienie / wiele kolumn na raz -> chart_type: table\n"
+            "Jesli wahasz sie miedzy pie a bar — wybierz bar (czytelny zawsze, pie tylko "
+            "przy nielicznych kategoriach). Typ KAZDEGO wykresu musi wynikac z natury "
+            "jego pod-celu, nie z checi pokazania roznych typow obok siebie."
+        )
     prompt = PROMPTS["plan_prompt"].format(
         types_instruction=types_instruction,
         goal=body.goal,
@@ -1630,7 +1681,7 @@ def internal_process_sql_attempt(body: InternalProcessSqlIn):
     top_match = re.search(r'(?i)\btop\s+(\d+)\b', body.goal or "")
     if top_match and not re.search(r'(?i)\bLIMIT\b', sql):
         sql = f"{sql.rstrip().rstrip(';')} LIMIT {top_match.group(1)}"
-    ok, verr, cols, sample = _run_and_validate(body.schema_name, sql, ctype)
+    ok, verr, cols, sample, ctype = _run_and_validate(body.schema_name, sql, ctype)
     # Guard: SQL poprawny, ale 0 wierszy = bezuzyteczna karta w Metabase ("No results!").
     # Traktuj jako blad walidacji -> retry z podpowiedzia; po wyczerpaniu prob wykres
     # zostanie pominiety i pokazany w ostrzezeniu (zamiast pustej karty).
@@ -1644,7 +1695,10 @@ def internal_process_sql_attempt(body: InternalProcessSqlIn):
         # (n8n dostaje blad w odpowiedzi, ale nie zapisuje prob posrednich).
         print(f"[sql-attempt FAIL] schema={body.schema_name} chart={ctype} "
               f"err={str(verr)[:220]} sql={sql[:220]}")
-    return {"ok": ok, "sql": sql, "error": verr, "columns": cols, "sample": sample}
+    # chart_type w odpowiedzi moze sie roznic od body.chart_type (patrz _run_and_validate:
+    # kolowy z za duza kardynalnoscia -> slupkowy) — n8n MUSI uzyc tego, nie oryginalnego
+    # spec.chart_type, przy wywolaniu /internal/finalize-chart, inaczej poprawka nie dziala.
+    return {"ok": ok, "sql": sql, "error": verr, "columns": cols, "sample": sample, "chart_type": ctype}
 
 
 class InternalFinalizeChartIn(BaseModel):
