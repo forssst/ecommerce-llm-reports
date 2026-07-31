@@ -1233,7 +1233,7 @@ def update_prompts(body: PromptsIn, _: int = Depends(verify_token)):
     return {"ok": True, "prompts": PROMPTS}
 
 
-MAX_UPLOAD_BYTES = 150 * 1024 * 1024  # 150 MB (olist.sqlite z testow ma ~111MB)
+MAX_UPLOAD_BYTES = 500 * 1024 * 1024  # 500 MB
 
 
 @app.post("/upload")
@@ -1268,7 +1268,7 @@ async def upload_database(user_id: int = Form(...), files: List[UploadFile] = Fi
                     os.remove(tmp_path)
                     raise HTTPException(
                         status_code=413,
-                        detail=f"Plik za duży — limit {MAX_UPLOAD_BYTES // (1024 * 1024)} MB")
+                        detail=f"Plik za duży - limit {MAX_UPLOAD_BYTES // (1024 * 1024)} MB")
                 buf.write(chunk)
 
         # Wczytaj wszystkie tabele tego pliku do słownika DataFrame-ów

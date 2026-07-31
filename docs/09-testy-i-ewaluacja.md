@@ -330,7 +330,165 @@ NIE wyszło z mojego przeglądu kart Metabase, tylko z samodzielnego, naiwnego t
 usera jako zwykłego użytkownika (bez wiedzy, co system powinien czy nie powinien zrobić) —
 dokładnie to, o co prosił promotor w metazadaniu „przejdź aplikację od zera".
 
-## 7. Jak te poziomy się uzupełniają (na obronę)
+## 7. Test wielu niepowiązanych źródeł po multi-upload (Olist + sklep_testowy)
+
+Multi-upload (punkt 5 promotora, patrz sekcja 2 i commit `dffc964`) był dotąd testowany na
+źródłach, które MIAŁY sens złączone (produkty/klienci/zamówienia tego samego sklepu — sekcja 2,
+blok J). User rozszerzył test 2026-07-27 o scalenie dwóch domenowo NIEPOWIĄZANYCH baz w jeden
+schemat: `olist` (prawdziwy marketplace, 9 tabel, ~100k wierszy: customers, orders, order_items,
+products, sellers, payments, reviews, geolocation, category_translation) i `sklep_testowy`
+(syntetyczna, 1 tabela, 7 kolumn) — bez żadnego wspólnego klucza. UI nie wymaga i niczym nie
+sugeruje, że wgrywane razem pliki muszą mieć wspólny klucz — więc taki scenariusz (przypadkowe
+albo świadomie „na granicy" połączenie niepowiązanych zbiorów) jest realny dla zwykłego
+użytkownika, nie tylko sztuczny na potrzeby testu. Cel: sprawdzić, co robi system, gdy prompt
+zakłada relację między źródłami, której fizycznie nie da się wyrazić SQL-em.
+
+Ten test wiąże się wprost z otwartym **punktem 7 uwag promotora** („weryfikacja wykres↔surowe
+dane") — dostarcza konkretny, udokumentowany przypadek, w którym karta na dashboardzie
+prezentuje coś innego niż to, o co user faktycznie prosił, a jedynym sposobem to wykryć jest
+ręczne porównanie tytułu i wykresu z surowym SQL (przycisk „Pokaż SQL"). System dziś nie ma
+żadnego automatycznego sygnału „ta karta nie odpowiada part promptu X" — cały ciężar wykrycia
+spoczywa na uważności użytkownika.
+
+> **Zrzut 7.1 (do przygotowania):** zakładka „Bazy danych" z rozwiniętym wpisem `frank` —
+> widoczna lista tabel z prefiksami `olist__` (9 pozycji) obok `sklep_testowy__` (1 pozycja) w
+> jednym schemacie. Cel: pokazać czytelnikowi pracy, że multi-upload realnie scala domenowo
+> niepowiązane źródła bez żadnego ostrzeżenia UI — punkt wyjścia dla całej tej sekcji.
+
+### Wyniki 6 promptów na scalonej bazie `frank` (olist + sklep_testowy)
+
+| # | Cel analityczny | Wynik | Auto-korekty |
+|---|---|---|---|
+| 1 | „Pokaż liczbę zamówień miesięcznie w Olist oraz osobno miesięczną sprzedaż w sklepie" | 3 wykresy zamiast 2 (dodatkowy, nieproszony „Top 5 produktów Olist") | 1 |
+| 2 | „Porównaj średnią wartość zamówienia klientów z Olist i ze sklepu testowego" | 3 wykresy: 2 osobne agregaty + 1 „porównanie" | 4 |
+| 3 | „Które kategorie produktów sprzedają się najlepiej łącznie w obu zbiorach danych?" | Wszystkie 3 wykresy tylko z Olist — sklep_testowy **po cichu pominięty**, bez ostrzeżenia | 0 |
+| 4 | „Top 10 najlepiej sprzedających się produktów w Olist oraz top 5 kategorii w sklepie" | Wykres Olist **odpadł z walidacji**, zostały tylko 2 wykresy sklepu | 2 (1 odrzucony) |
+| 5 | „Połącz dane klientów z Olist z danymi mojego sklepu testowego w jedną analizę" | 2 z 3 wykresów odpadło; jedyny ocalały ma błędną etykietę (patrz niżej) | 5 |
+| 6 | „Jaka jest najpopularniejsza metoda płatności w Olist i jaka średnia wartość zamówienia w sklepie?" | Czysto rozdzielone, oba wykresy poprawne | 1 |
+
+Wzorzec widoczny już w samej tabeli: promptu 3 i 6 pytają o to samo pod względem struktury
+(jedna metryka rozbita na dwa źródła), ale różnią się czasownikiem — „łącznie" (3) vs domyślne
+rozdzielenie sugerowane strukturą zdania (6, „i" zamiast „łącznie"). To rozróżnienie okazuje się
+mieć największe znaczenie ze wszystkich sześciu testów (patrz Obserwacja B).
+
+### Obserwacja A: liczba auto-korekt rośnie z żądaniem POŁĄCZENIA, nie samą obecnością dwóch źródeł
+
+Testy 3 i 6 (po jednej stronie) mają 0 i 1 auto-korektę mimo że oba dotyczą DWÓCH źródeł naraz —
+sama obecność dwóch niepowiązanych tabel w prompcie nie jest więc kosztowna sama w sobie. Koszt
+pojawia się dopiero, gdy prompt używa czasownika/spójnika sugerującego POŁĄCZENIE: test 2
+(„porównaj") — 4 auto-korekty, test 5 („połącz... w jedną analizę") — 5 auto-korekt, najwięcej w
+całym zestawie. Wzorzec zgodny z resztą rozdziału: retry rośnie, gdy model wielokrotnie próbuje
+SQL, który nie da się poprawnie napisać dla zadanego celu — tu nie z powodu literówki czy złej
+wartości (jak B4, sekcja 3), tylko dlatego że relacja, o którą prosi prompt, fizycznie nie
+istnieje w danych (brak wspólnego klucza między `olist__*` a `sklep_testowy__*`). Innymi słowy:
+model „czuje", że zadanie wymaga JOIN-a, i płaci za tę próbę realnymi kosztami (czas, retry),
+zanim — w najlepszym razie — podda się i wygeneruje dwa osobne agregaty obok siebie zamiast
+jednego połączonego wyniku.
+
+### Obserwacja B: dwa różne tryby awarii przy niemożliwym połączeniu — cichy fallback vs jawna porażka
+
+Test 3 i test 5 różnią się jakościowo, mimo podobnego zamiaru promptu:
+- **Test 3** — model NIE zgłosił żadnego problemu. Zwyczajnie zignorował `sklep_testowy` i
+  odpowiedział wyłącznie na podstawie Olist (kategorie: beleza_saude, relogios_presentes,
+  cama_mesa_banho, esporte_lazer, informatica_acessorios — wszystkie portugalskie, żadnej
+  polskiej z sklep_testowy). Zero auto-korekt, zero ostrzeżenia „N wykresów nie przeszło
+  walidacji" — z perspektywy użytkownika dashboard wygląda na kompletny, mimo że jedno z dwóch
+  żądanych źródeł zniknęło bez śladu. To groźniejszy tryb awarii niż widoczna porażka, bo nie
+  ma żadnego sygnału, że coś poszło nie tak — user musiałby SAM zauważyć, że żadna kategoria
+  na wykresie nie brzmi po polsku, żeby się domyślić, iż `sklep_testowy` zniknął z odpowiedzi.
+- **Test 5** — model próbował (5 auto-korekt), 2 z 3 wykresów jawnie odpadły z walidacji
+  (widoczne ostrzeżenie), ale jedyny ocalały wykres ma tytuł „Liczba klientów w różnych
+  segmentach", podczas gdy oś X to w rzeczywistości `product_category_name_english` z Olist
+  (bed_bath_table, health_beauty, sports_leisure...) — nie klienci ani segmenty klientów w
+  ogóle. To najbardziej skrajny dotąd przykład rozjazdu tytuł≠SQL w tym rozdziale: nie chodzi
+  o drobne przesunięcie znaczenia (np. grupowanie po miesiącu zamiast kategorii, sekcja 6), tylko
+  o całkowitą podmianę encji domenowej pod niezmieniony tytuł — klient zamieniony na kategorię
+  produktu, a etykieta karty o tym milczy.
+
+Zestawione razem, testy 3 i 5 pokazują, że „widoczne ostrzeżenie o pominiętych wykresach" (test 5)
+wcale nie jest gorszym scenariuszem niż jego brak (test 3) — jest od niego BEZPIECZNIEJSZY,
+bo przynajmniej sygnalizuje użytkownikowi, że coś zawiodło. Najgorszy z możliwych wyników to
+kombinacja obu wad naraz: karta, która przeszła walidację (więc brak ostrzeżenia), ale pokazuje
+inną encję niż tytuł obiecuje — dokładnie przypadek testu 5.
+
+> **Zrzut 7.2 (do przygotowania):** dashboard z testu 3 — karta kołowa/słupkowa z widocznymi
+> portugalskimi nazwami kategorii (beleza_saude, relogios_presentes, cama_mesa_banho...) i BRAK
+> jakiegokolwiek żółtego ostrzeżenia „N wykresów nie przeszło walidacji" na górze dashboardu.
+> Cel: wizualny dowód „cichego" trybu awarii — dashboard wygląda na kompletny mimo pominięcia
+> jednego z dwóch żądanych źródeł. Warto zrobić ujęcie całego dashboardu (nie tylko karty), żeby
+> było widać brak ostrzeżenia w kontekście.
+
+> **Zrzut 7.3 (do przygotowania):** dashboard z testu 5 — karta „Liczba klientów w różnych
+> segmentach" + rozwinięty podgląd SQL (przycisk „Pokaż SQL") w tym samym ujęciu albo dwa
+> zrzuty obok siebie (karta + SQL). W SQL musi być widoczne `GROUP BY
+> product_category_name_english` lub analogiczna kolumna Olist, żeby kontrast tytuł↔SQL był
+> czytelny bez komentarza. To najmocniejszy dowód wizualny w tej sekcji — kandydat na główny
+> rysunek przy opisie problemu tytuł≠SQL w rozdziale Dyskusja/Ewaluacja.
+
+### Obserwacja C: skala jako osobna przyczyna porażki (test 4)
+
+„Top 10 produktów Olist" odpadło z walidacji mimo że analogiczne „Top 5 produktów Olist" w
+teście 1 zadziałało bez problemu w tej samej sesji — sugeruje, że przyczyna nie leży w samej
+tabeli `products`/`order_items`, tylko w interakcji z drugą częścią promptu (dwa różne źródła
+i dwie różne wartości N w jednym celu analitycznym — model musi w jednym wywołaniu planowania
+rozbić prompt na dwa pod-cele z różnymi limitami, a potem poprawnie przypisać SQL do właściwego
+źródła). Możliwa hipoteza (NIEPRZEBADANA): przy dwóch liczbach N w jednym celu analitycznym model
+myli, które źródło dostaje `LIMIT 10`, a które `LIMIT 5` — analogicznie do znanego wzorca
+„top N → LIMIT" z sekcji 6, tylko tu z dwoma konkurującymi wartościami N naraz. Wymaga
+zajrzenia w log `[sql-attempt FAIL]` dla pełnej diagnozy — dobry kandydat na kolejny pojedynczy
+test (np. „top 10 X i top 10 Y" z tą samą wartością N po obu stronach, żeby wykluczyć hipotezę
+o myleniu limitów).
+
+### Obserwacja D: konsekwencja dla projektu — brak metadanych o relacji między źródłami
+
+Wspólny mianownik testów 2, 3, 4 i 5: system NIE wie i nigdzie nie zapisuje, czy tabele
+wgrane razem w ramach multi-upload są ze sobą w jakikolwiek sposób powiązane (wspólny klucz,
+wspólna domena) — `schema_json` (patrz architektura danych w `CLAUDE.md`) opisuje tylko
+strukturę KAŻDEJ tabeli osobno, nie relacje MIĘDZY tabelami z różnych plików źródłowych. Model
+dostaje więc do dyspozycji schemat 10 tabel bez żadnej wskazówki, że `olist__*` i
+`sklep_testowy__*` to w istocie dwa niepowiązane światy — i musi to „odgadnąć" wyłącznie z nazw
+kolumn, co przy braku wspólnego klucza czasem mu się udaje (test 6: poprawnie rozdzielił), a
+czasem nie (test 3: po cichu wybrał jedno źródło; test 5: wymyślił złączenie, którego nie ma).
+To wskazuje na możliwy kierunek rozwoju (NIE zaimplementowany, materiał do rozdziału Dyskusja):
+przekazywanie modelowi na etapie planowania jawnej informacji o pochodzeniu każdej tabeli
+(z którego pliku źródłowego pochodzi — dane te już istnieją w prefiksie nazwy tabeli, tylko nie
+są dziś wyróżnione w promptcie jako sygnał „te tabele są z innego źródła niż tamte") i/lub
+prostej heurystyki „brak wspólnej kolumny klucza między prefiksami → ostrzeż usera przed
+generacją, nie po niej".
+
+### Powiązanie z wcześniejszym problemem „3 wykresy zamiast 2"
+
+Test 1 to **drugi, niezależny przypadek** modelu ignorującego jawnie podaną liczbę wykresów w
+celu analitycznym (pierwszy: „dwa rankingi" na `sklep_testowy.csv`, sekcja 6, checkpoint
+2026-07-24). Dwa wystąpienia w różnych sesjach i na różnych bazach podnoszą priorytet tego jako
+realnego wzorca do opisania w Ewaluacji, niezależnie od tego, czy zostanie naprawiony w kodzie.
+
+### Zagrożenia dla trafności (threats to validity)
+
+Uczciwie odnotować ograniczenia tego konkretnego testu, zanim trafi do pracy: (1) każdy z 6
+promptów puszczony był **tylko raz** (nie jak harness, sekcja 3, gdzie liczby są uśrednione) —
+niedeterminizm modelu (widoczny w wielu miejscach tego rozdziału, np. „TOP 10 w 2024" w sekcji
+6) oznacza, że pojedyncze auto-korekty mogłyby wyjść inaczej przy powtórzeniu; (2) dobór 6
+promptów był celowy pod kątem różnych sformułowań relacji („oraz", „porównaj", „łącznie",
+„top X i top Y", „połącz", „i") a nie losowy — to dobre dla jakościowej ilustracji zjawiska
+(cel tej sekcji), złe dla twierdzeń ilościowych o częstości; ewentualne liczby (np. „5 z 6
+promptów miało problem") NIE powinny być prezentowane jako reprezentatywny odsetek, tylko jako
+opis tego konkretnego zestawu.
+
+**Why to dobry materiał na obronę:** to pierwszy test w tym rozdziale celowo zaprojektowany
+pod kątem semantycznej integralności PRZY SCALANIU (nie integralności pojedynczego SQL ani
+integralności wykres↔dane z bloku K) — pokazuje granicę tego, co multi-upload (punkt 5) może
+zrobić bezpiecznie: działa dobrze, gdy prompt sam rozdziela źródła, i psuje się na dwa różne
+sposoby (cichy fallback, jawna porażka z błędną etykietą), gdy prompt zakłada relację, której
+fizycznie nie ma. Jest to też bezpośredni, konkretny materiał dowodowy do punktu 7 uwag
+promotora, który wcześniej nie miał żadnego udokumentowanego przypadku poza ogólnym
+sformułowaniem tematu.
+
+**Zrzuty do przygotowania — podsumowanie:** 7.1 (lista tabel `frank`), 7.2 (dashboard testu 3,
+brak ostrzeżenia), 7.3 (karta+SQL testu 5, rozjazd tytuł↔SQL). Sugerowana lokalizacja plików
+(analogicznie do sekcji 6): `pliki_testowe/screeny_multi_niepowiazane/` (poza gitem, lokalnie).
+
+## 8. Jak te poziomy się uzupełniają (na obronę)
 
 | Poziom | Pytanie, na które odpowiada |
 |---|---|
@@ -349,3 +507,6 @@ dokładnie to, o co prosił promotor w metazadaniu „przejdź aplikację od zer
 6. Karta 132/377 miała poprawny SQL i poprawny tytuł, a mimo to była złym wykresem —
    wyjaśnij, czym różni się ten błąd od „tytuł≠SQL", i dlaczego `_check_category_cardinality`
    musiał liczyć DISTINCT na pełnym wyniku, a nie na 5-wierszowej próbce jak reszta guardów.
+7. W teście na scalonej bazie Olist+sklep_testowy, dwa prompty żądające połączenia
+   niepowiązanych źródeł zawiodły na różne sposoby (test 3 vs test 5) — wyjaśnij różnicę i
+   który tryb awarii jest groźniejszy dla użytkownika, który nie zna wnętrza systemu.
