@@ -94,7 +94,8 @@ Interfejs użytkownika: <http://localhost:5173>.
 ## 8. Wgraj dane
 
 Załóż konto w aplikacji, a następnie wgraj plik przez zakładkę *Bazy danych*.
-Obsługiwane formaty: `.csv`, `.xlsx`, `.xls`, `.db`/`.sqlite`. Dane trafiają do
+Obsługiwane formaty: `.csv`, `.xlsx`, `.xls` oraz pliki SQLite (`.db`, `.sqlite`,
+`.sqlite3`). Dane trafiają do
 PostgreSQL, do osobnego schematu na każdą wgraną bazę (nazwa schematu:
 *identyfikator użytkownika + nazwa pliku*, np. `u2_northwind`).
 

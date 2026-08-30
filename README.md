@@ -13,15 +13,19 @@ Przepływ: **React → FastAPI → n8n (orkiestracja) → Ollama (LLM) → walid
 bazie → Metabase**.
 
 1. Użytkownik wybiera bazę danych i opisuje cel analizy po polsku.
-2. Backend planuje wykresy i generuje dla każdego z nich SQL przez lokalny model językowy.
-3. Każde zapytanie jest walidowane na prawdziwych danych; błędne SQL są automatycznie
-   poprawiane (mechanizm retry z informacją o błędzie).
-4. Backend buduje dashboard w Metabase i zwraca publiczny link, który frontend osadza.
+2. Backend przekazuje żądanie do przepływu n8n, który rozbija cel na zestaw wykresów,
+   wołając lokalny model językowy.
+3. Dla każdego wykresu powstaje osobne zapytanie SQL, walidowane przez wykonanie na
+   prawdziwych danych; błędne zapytanie wraca do modelu wraz z treścią błędu (do trzech prób).
+4. n8n buduje dashboard w Metabase, publikuje go i zwraca link, który frontend osadza.
+   Logika (budowa promptów, czyszczenie i walidacja SQL, zabezpieczenia) pozostaje po
+   stronie backendu, wołana przez n8n jako punkty końcowe `/internal/...`.
 
 ## Stack technologiczny
 
 - **Frontend:** React + Vite + Tailwind
-- **Backend:** FastAPI (Python), SQLAlchemy + SQLite
+- **Backend:** FastAPI (Python), SQLAlchemy + SQLite (baza systemowa)
+- **Dane analityczne:** PostgreSQL (osobny schemat na każdą wgraną bazę)
 - **Model językowy:** Ollama (qwen2.5-coder:7b)
 - **Wizualizacja:** Metabase
 - **Orkiestracja:** n8n (główna ścieżka generowania dashboardu)
