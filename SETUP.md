@@ -83,11 +83,17 @@ n8n jest główną warstwą orkiestracji generowania — bez niego system nie zb
 1. Wejdź na <http://localhost:5678> i załóż konto lokalne.
 2. *Import from File* → wybierz `n8n_orchestrator_workflow.json` z katalogu repozytorium
    (29 węzłów).
-3. Otwórz węzeł **Metabase Login** i w polu *JSON Body* wpisz e-mail i hasło konta
+3. Utwórz poświadczenie dla Ollamy: *Credentials* → *Add credential* → wyszukaj
+   **Ollama** → w polu *Base URL* wpisz `http://ollama:11434` i zapisz. Następnie otwórz
+   węzeł **Model Ollama (Plan)** i wybierz to poświadczenie z listy.
+   Bez tego kroku węzeł ma wiszące odwołanie do poświadczenia z innej instalacji
+   i etap planowania dashboardu zakończy się błędem — mimo że pozostałe wywołania modelu
+   (węzeł *Generuj SQL i Zbierz Wykresy*) działają, bo wołają Ollamę wprost po adresie.
+4. Otwórz węzeł **Metabase Login** i w polu *JSON Body* wpisz e-mail i hasło konta
    administratora Metabase w miejsce `WPISZ_EMAIL_ADMINA_METABASE` i
    `WPISZ_HASLO_ADMINA_METABASE`. Te same dane, co w `.env` — n8n loguje się do Metabase
    niezależnie od backendu i dlatego potrzebuje ich osobno.
-4. Ustaw przepływ jako **Active**. Produkcyjny webhook rejestruje się dopiero po
+5. Ustaw przepływ jako **Active**. Produkcyjny webhook rejestruje się dopiero po
    aktywacji — dopóki tego nie zrobisz, backend dostanie błąd 404.
 
 Backend woła przepływ pod adresem `http://n8n_local:5678/webhook/create-dashboard`.
@@ -123,6 +129,7 @@ Przykładowe zbiory testowe są w katalogu `pliki_testowe/`.
 | Metabase wpada w pętlę restartów | `JAVA_OPTS` musi mieć `-Xms` nie większe niż `-Xmx` |
 | generowanie zwraca 404 z n8n | przepływ nie jest ustawiony jako *Active* |
 | dashboard nie powstaje, w n8n błąd 401 na węźle *Metabase Login* | nie uzupełniono danych logowania w tym węźle po imporcie (krok 6) |
+| generowanie pada na etapie planu, węzeł *Model Ollama (Plan)* zgłasza brak poświadczenia | nie utworzono poświadczenia Ollamy w n8n (krok 6) — nie jest ono częścią eksportu przepływu |
 | build kończy się błędem na `task-runners` | uruchomiono `docker compose up` bez wymienienia usług (patrz krok 3) |
 
 Po każdej zmianie w kodzie backendu trzeba przebudować obraz:
