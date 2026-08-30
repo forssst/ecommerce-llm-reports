@@ -108,8 +108,7 @@ Wysyłany JSON:
   "description": "Baza zawiera dane o muzyce...",
   "chart_type": "",
   "schema_text": "Tabela album: ...",
-  "db_path": "u2_chinook",
-  "n8n_url": "http://n8n_local:5678/webhook/sales-report"
+  "db_path": "u2_chinook"
 }
 ```
 

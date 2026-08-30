@@ -9,7 +9,9 @@
 
 `POST /api/session {username, password}` → `{"id": "<token>"}` →
 nagłówek `X-Metabase-Session: <token>` we wszystkich kolejnych wywołaniach.
-Creds = konto ADMINA Metabase zaszyte w `main.py` (i w węźle `Metabase Login`).
+Creds = konto ADMINA Metabase, czytane ze zmiennych `METABASE_USER` /
+`METABASE_PASSWORD` (plik `.env`); w n8n te same dane uzupełnia się w węźle
+`Metabase Login`.
 Konsekwencja: wszystkie dashboardy powstają na jednym koncie (izolacja
 per-user w Metabase — patrz kierunki rozwoju).
 

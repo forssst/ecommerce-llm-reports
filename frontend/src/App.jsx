@@ -310,7 +310,6 @@ export default function App() {
           chart_type: buildChartType(),
           schema_text: schemaText,
           db_path: selectedDb.file_path,
-          n8n_url: "http://n8n_local:5678/webhook/sales-report",
         }),
       });
       const data = await res.json();

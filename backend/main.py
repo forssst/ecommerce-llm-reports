@@ -172,7 +172,6 @@ class GenerateIn(BaseModel):
     chart_type: str = ""
     schema_text: str = ""
     db_path: str = ""
-    n8n_url: str = ""
     n8n_timeout: int = 120
 
 

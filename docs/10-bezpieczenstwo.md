@@ -34,7 +34,7 @@
 ### 2.3. Upload bez limitów i z nazwą od użytkownika
 - **Było:** brak limitu rozmiaru (DoS dyskiem), nazwa pliku od usera trafiała
   na dysk (path traversal `../../...`), błędy parsowania jako 500.
-- **Naprawa:** strumieniowy licznik z limitem (dziś 150 MB) → 413;
+- **Naprawa:** strumieniowy licznik z limitem (500 MB) → 413;
   plik na dysku pod NAZWĄ LOSOWĄ `uuid4` (klasa problemu wyeliminowana,
   nie „sanityzowana"); `os.path.basename` na nazwie wyświetlanej; 400 z opisem
   zamiast 500.

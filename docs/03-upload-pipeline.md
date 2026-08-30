@@ -7,7 +7,7 @@
 ## 0. Big picture
 
 ```
-plik → [limit 150MB, strumieniowo] → /tmp/_upload_<uuid><ext>
+plik → [limit 500 MB, strumieniowo] → /tmp/_upload_<uuid><ext>
      → parsowanie do {nazwa_tabeli: DataFrame}
      → DROP+CREATE SCHEMA u{uid}_{nazwa} → GRANT USAGE dla readonly
      → to_sql per tabela → detekcja i rzutowanie kolumn dat
@@ -22,9 +22,10 @@ orig_name = os.path.basename(file.filename or "upload")   # utnij ścieżki (../
 tmp_path = f"/tmp/_upload_{uuid.uuid4().hex}{ext}"        # LOSOWA nazwa na dysku
 ```
 Czytanie STRUMIENIOWE po 1 MB z licznikiem — przekroczenie
-`MAX_UPLOAD_BYTES` (150 MB; podniesione z 20→50→150 pod northwind i olist)
+`MAX_UPLOAD_BYTES` (500 MB; podnoszone kolejno z 20 MB pod northwind, olist
+i wgrywanie wielu plików naraz)
 przerywa zapis, kasuje plik częściowy i zwraca **413**. Dzięki strumieniowaniu
-nie ładujemy 150 MB do RAM ani nie pozwalamy zapchać dysku plikiem 10 GB.
+nie ładujemy całego pliku do RAM ani nie pozwalamy zapchać dysku plikiem 10 GB.
 
 Nazwa oryginalna służy WYŁĄCZNIE do wyświetlania i wyliczenia nazwy schematu;
 na dysku plik nigdy nie nosi nazwy od użytkownika (path traversal wyeliminowany

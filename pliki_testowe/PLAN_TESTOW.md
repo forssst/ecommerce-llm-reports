@@ -327,8 +327,8 @@ Cel: `przychody według kraju klienta`
 
 Trzy osobne pliki Excel (`sklep_produkty.xlsx`, `sklep_klienci.xlsx`,
 `sklep_zamowienia.xlsx`, katalog `pliki_testowe/multiplik_test/`), sensowne wyłącznie
-razem — test funkcji dodanej 2026-07-23 na wniosek promotora (możliwość analizy kilku
-osobnych plików naraz, np. kilku arkuszy Excel). Zakładka „Bazy danych", pole pliku
+razem — test funkcji dodanej 2026-07-23 (możliwość analizy kilku osobnych plików naraz,
+np. kilku arkuszy Excel). Zakładka „Bazy danych", pole pliku
 z atrybutem wielokrotnego wyboru.
 
 ### J1 — Wgranie trzech plików naraz pod jedną nazwą
@@ -348,8 +348,8 @@ Cel testu: system nie zgaduje nazwy sam, gdy plików jest więcej niż jeden.
 - [ ] Czytelny komunikat błędu (nie 500, nie cichy brak reakcji)
 
 ### J3 — Zapytanie wymagające złączenia wszystkich trzech plików (test kluczowy)
-Cel testu: właściwy dowód dla promotora — dashboard faktycznie łączy dane z osobno
-wgranych plików, nie tylko technicznie akceptuje upload.
+Cel testu: wykazanie, że dashboard faktycznie łączy dane z osobno wgranych plików,
+a nie tylko technicznie przyjmuje upload.
 Cel: `suma sprzedanej ilości według kategorii produktu i miasta klienta`
 (wymaga: zamowienia + produkty + klienci)
 - [x] Wykres pokazuje kategorie i/lub miasta jako etykiety (nie identyfikatory) — 2026-07-23
@@ -363,7 +363,7 @@ Zaobserwowane 2 przypadki znanego ograniczenia modelu 7B (nie błąd kodu, mater
 Ewaluacji): (a) wykres kołowy "udział kategorii produktów" pogrupował błędnie po dacie
 zamiast po kategorii — ten sam wzorzec co odnotowany 2026-07-06 ("tytuł ≠ SQL"); (b) wykres
 liniowy z 15 nakładającymi się seriami (produkty) — zły wybór typu wykresu dla tej liczby
-kategorii, przykład do punktu promotora o dobrych praktykach wizualizacji.
+kategorii, przykład do oceny zgodności z dobrymi praktykami wizualizacji.
 
 ### J4 — Trend i filtr dat na scalonej bazie
 Cel: `miesięczny trend zamówień w 2024 roku`
@@ -376,9 +376,9 @@ Cel testu: multi-upload nie zepsuł dotychczasowego zachowania dla 1 pliku.
 - [ ] Nazwa bazy w liście = nazwa pliku (jak przed zmianą), tabela `produkty`
   BEZ prefiksu z nazwą pliku
 
-## K. Weryfikacja zgodności wykres ↔ surowe dane (punkt 7 promotora)
+## K. Weryfikacja zgodności wykres ↔ surowe dane
 
-Promotor zapytał o dowód, że to co pokazuje wykres w Metabase faktycznie zgadza się z
+Cel bloku: wykazać, że to, co pokazuje wykres w Metabase, faktycznie zgadza się z
 wynikiem zapytania SQL na surowych danych — nie tylko „czy dashboard się wygenerował".
 Instrukcja do samodzielnego wykonania dla dowolnego już wygenerowanego dashboardu.
 

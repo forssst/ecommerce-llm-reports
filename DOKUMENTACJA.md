@@ -1,13 +1,12 @@
 # AI Data Analyst — dokumentacja techniczna systemu
 
-> Stan na 2026-07-06, branch `n8n-experiment`. Dokument pełni trzy role:
-> 1) **podręcznik do nauki systemu** (każdy rozdział kończy się pytaniami kontrolnymi),
-> 2) **podwaliny pod rozdziały pracy inżynierskiej** (mapowanie na końcu),
-> 3) **dokumentacja operacyjna** (jak uruchomić, debugować, mierzyć).
+> Dokumentacja techniczna prototypu. Opisuje architekturę systemu, jego komponenty,
+> przepływ generowania dashboardu, mechanizmy walidacji i zabezpieczeń, wyniki testów
+> oraz sposób uruchomienia i debugowania. Stan na 2026-08-30.
 
-## 📚 Seria szczegółowa `docs/` (deep dive — czytaj PO tym przeglądzie)
+## Seria szczegółowa `docs/`
 
-Ten plik to WARSTWA PRZEGLĄDOWA. Pełne wejście w szczegóły (kod linia po linii,
+Ten plik stanowi warstwę przeglądową. Szczegóły (kod linia po linii,
 przykłady żądań/odpowiedzi, treści promptów z adnotacjami, wyniki per prompt):
 
 | Plik | Zakres |
@@ -23,9 +22,6 @@ przykłady żądań/odpowiedzi, treści promptów z adnotacjami, wyniki per prom
 | [docs/09-testy-i-ewaluacja.md](docs/09-testy-i-ewaluacja.md) | 4 poziomy testów + PEŁNE wyniki per prompt (harness/golden/stress) |
 | [docs/10-bezpieczenstwo.md](docs/10-bezpieczenstwo.md) | model zagrożeń, 4 luki jako studia przypadku, defense-in-depth, otwarta lista |
 | [docs/11-analiza-konkurencji.md](docs/11-analiza-konkurencji.md) | przegląd 6 istniejących narzędzi NL-to-SQL/auto-dashboard (komercyjne + open source), tabela porównawcza, czym różni się ten projekt |
-
-Każdy plik serii kończy się sekcją „Sprawdź się" — razem ~50 pytań kontrolnych
-na jutrzejszą naukę.
 
 ---
 
@@ -44,8 +40,7 @@ na jutrzejszą naukę.
 11. [Kierunki rozwoju](#11-kierunki-rozwoju)
 12. [Operacje — komendy i debugowanie](#12-operacje)
 13. [Słowniczek](#13-słowniczek)
-14. [FAQ na obronę](#14-faq-na-obronę)
-15. [Mapowanie na rozdziały pracy](#15-mapowanie-na-rozdziały-pracy)
+14. [Uzasadnienie kluczowych decyzji projektowych](#14-uzasadnienie-kluczowych-decyzji-projektowych)
 
 ---
 
@@ -66,9 +61,6 @@ własną bazę danych (SQLite/CSV/Excel), opisuje **po polsku** co chce zobaczy�
 - **Prywatność** — brak kluczy API, brak kosztów, działanie offline.
 - **Język polski** — cały interfejs, prompty i wyniki po polsku (nietrywialne
   dla małego modelu — patrz rozdz. 9, *language drift*).
-
-**Sprawdź się:** Wymień 3 filary koncepcji i uzasadnij każdy jednym zdaniem.
-Co system robi między wpisaniem celu a pokazaniem dashboardu (4 kroki)?
 
 ---
 
@@ -131,10 +123,6 @@ W systemowej SQLite jest tylko *wskaźnik* (kolumna `file_path` = nazwa schematu
 łatwiej napisać jeden poprawny SQL do wąskiego celu niż cały dashboard naraz.
 Dekompozycja = wyższa jakość + niezależna walidacja każdego wykresu.
 
-**Sprawdź się:** Narysuj z pamięci diagram 2.2. Dlaczego logika NIE została
-przepisana do n8n? Co dokładnie trzyma `file_path` w tabeli `databases` i czemu
-to nie jest ścieżka pliku?
-
 ---
 
 ## 3. Komponenty szczegółowo
@@ -166,8 +154,8 @@ wymagają JWT):
 | Endpoint | Metoda | Rola |
 |---|---|---|
 | `/register`, `/login` | POST | konta; bcrypt + JWT (HS256, z terminem ważności) |
-| `/health` | GET | status usług (Ollama, Postgres) |
-| `/upload` | POST | import pliku → schemat Postgresa; **upsert** wpisu; limit 150 MB |
+| `/health` | GET | status usług (Ollama, Metabase, Postgres) |
+| `/upload` | POST | import pliku → schemat Postgresa; **upsert** wpisu; limit 500 MB |
 | `/users/{id}/databases` | GET | lista baz usera + świeży schemat (kontrola właściciela) |
 | `/databases/{id}` | DELETE | usuwa wpis + DROP SCHEMA (kontrola właściciela) |
 | `/users/{id}/queries` | GET | historia generacji (kontrola właściciela) |
@@ -256,8 +244,9 @@ gitignorowany `n8n_config/`).
 
 ### 3.6. Metabase
 
-- Backend loguje się kontem administracyjnym (creds w `main.py` — znane
-  ograniczenie: produkcyjnie do zmiennych środowiskowych).
+- Backend loguje się kontem administracyjnym; dane logowania pochodzą ze zmiennych
+  `METABASE_USER` / `METABASE_PASSWORD` (plik `.env`, wzorzec w `.env.example`).
+  Brak którejkolwiek z nich zatrzymuje start backendu.
 - Auto-rejestracja bazy: jeśli schematu nie ma wśród źródeł Metabase, tworzone
   jest połączenie `engine: postgres` z `currentSchema={schemat}` i **rolą readonly**.
 - Karta = *native question* (SQL) + `visualization_settings` (typ wykresu,
@@ -266,10 +255,6 @@ gitignorowany `n8n_config/`).
   publikacja przez **public link** (UUID) osadzany w iframe.
 - Gotcha: ta wersja Metabase zwraca zapytania kart w nowym formacie MBQL
   (`dataset_query.stages[0]`), nie `dataset_query.native`.
-
-**Sprawdź się:** Które endpointy nie wymagają JWT i dlaczego to bezpieczne
-(słowo-klucz: granica zaufania)? Po co są DWA sposoby wołania Ollamy w n8n?
-Co się stanie, gdy zapomnisz `activate` po `PATCH` workflow?
 
 ---
 
@@ -310,9 +295,6 @@ cel: **„top 5 produktow wedlug sumy sprzedazy"**.
 błąd w prompcie retry → poprawia lub (po 3 próbach) wykres jest pomijany
 i trafia do żółtego ostrzeżenia. Przy 0 wykresów — czytelny błąd całości.
 
-**Sprawdź się:** Opowiedz ten przepływ na głos bez patrzenia (6 kroków).
-W którym momencie i czym różni się ścieżka błędu od ścieżki sukcesu?
-
 ---
 
 ## 5. Guardy
@@ -347,10 +329,6 @@ języka nie łapie angielskiego (bez słownika się nie da); tytuł może obiecy
 „kategorie", a SQL grupować po miesiącach. Tam, gdzie kończy się determinizm,
 zaczyna się dokumentowanie ograniczeń (rozdz. 9).
 
-**Sprawdź się:** Wybierz 3 dowolne guardy i opowiedz: jaki bug → jaka naprawa.
-Dlaczego sama instrukcja w prompcie nie wystarcza? Który guard NIE jest
-w Pythonie i gdzie jest?
-
 ---
 
 ## 6. Bezpieczeństwo
@@ -362,7 +340,7 @@ w Pythonie i gdzie jest?
 | Hasła | bcrypt (hash+salt), nigdy plaintext |
 | Sesje | JWT HS256 z terminem ważności; `Depends(verify_token)` na endpointach |
 | Autoryzacja | user_id **z tokenu**, nie z requesta; kontrola właściciela zasobów (naprawione IDOR-y na `/users/{id}/...` i `DELETE /databases`) |
-| Upload | limit 150 MB, losowa nazwa pliku na dysku (path traversal), walidacja treści, 400 zamiast 500 |
+| Upload | limit 500 MB, losowa nazwa pliku na dysku (path traversal), walidacja treści, 400 zamiast 500 |
 | SQL od modelu | **rola read-only w Postgresie** — DROP/DELETE/UPDATE fizycznie niemożliwe (walidacja i karty Metabase) |
 | Izolacja danych | schemat-per-user w Postgresie; historia i bazy filtrowane po user_id |
 | `/internal/...` | bez JWT, ale nieosiągalne spoza sieci dockerowej — **granica zaufania** |
@@ -377,10 +355,6 @@ z testami regresyjnymi (31 przypadków pytest, 0 porażek).
 - porty n8n/Metabase/Postgresa wystawione na localhost (wygoda debugowania),
 - publiczne linki Metabase: kto ma URL, ten widzi dashboard (patrz rozdz. 11 —
   signed embedding / kolekcje per user).
-
-**Sprawdź się:** Czym różni się uwierzytelnianie od autoryzacji — pokaż na
-przykładzie `DELETE /databases/{id}`. Dlaczego read-only to obrona lepsza niż
-parsowanie SQL-a w poszukiwaniu „DROP"?
 
 ---
 
@@ -412,9 +386,6 @@ podsumowanie. Powtarzalny — po każdej zmianie można zmierzyć, czy jest lepi
 5 promptów z ręcznie napisanym wzorcowym SQL; porównywane są **WYNIKI zapytań**
 (nie tekst SQL) po normalizacji; dwa poziomy: EXACT (wiersze identyczne)
 i VALUES (wartości liczbowe + liczba wierszy zgodne).
-
-**Sprawdź się:** Czym różni się to, co mierzy harness, od tego, co mierzy
-golden set? Po co porównywać WYNIKI zapytań zamiast tekstu SQL?
 
 ---
 
@@ -532,7 +503,7 @@ docker logs -f n8n_local
 docker exec ollama ollama ps          # ile modelu na GPU vs CPU
 
 # testy
-PG_HOST=localhost venv/bin/pytest tests/          # 31 testów (venv głównego projektu)
+PG_HOST=localhost venv/bin/pytest tests/          # 33 testy (31 przez API + 2 wprost do Postgresa)
 venv/bin/python eval_harness.py [--smoke|--db X]  # harness
 venv/bin/python golden_set.py                     # golden set
 python3 stress_test_ollama.py                     # stress-test
@@ -550,7 +521,7 @@ docker exec postgres_analytics psql -U readonly -d analytics \
 
 Znane pułapki operacyjne: backend NIE ma wolumenu z kodem (zmiany w `main.py`
 wymagają `--build`, restart nie wystarczy); Metabase wymaga `Xms ≤ Xmx`;
-konto admina Metabase musi zgadzać się z creds w `main.py`.
+konto admina Metabase musi zgadzać się z danymi w pliku `.env`.
 
 ---
 
@@ -577,7 +548,7 @@ konto admina Metabase musi zgadzać się z creds w `main.py`.
 
 ---
 
-## 14. FAQ na obronę
+## 14. Uzasadnienie kluczowych decyzji projektowych
 
 **„Dlaczego lokalny model, nie ChatGPT?"** Prywatność (dane nie wychodzą),
 zero kosztów API, offline. Świadoma decyzja architektoniczna — cała reszta
@@ -607,26 +578,3 @@ z konkretnej przyczyny (timeout 120 s). Izolacja danych pełna (JWT + schematy
 niezawodny jest dopiero SYSTEM wokół niego: dekompozycja problemu, walidacja
 przez wykonanie, deterministyczne guardy, warstwowa odporność i pomiar.
 Każdy guard w tym systemie ma historię konkretnego buga z testów.
-
-**„Czego pan NIE zrobił i dlaczego?"** (lista z rozdz. 6.2 i 11 — umieć
-wymienić 3 pozycje z uzasadnieniem „lokalne demo vs produkcja").
-
----
-
-## 15. Mapowanie na rozdziały pracy
-
-| Rozdział pracy | Materiał w tej dokumentacji |
-|---|---|
-| Wstęp, cel i zakres | rozdz. 1 |
-| Przegląd istniejących rozwiązań | rozdz. 10 |
-| Technologie | rozdz. 2.1, 3 (opisy komponentów) |
-| Architektura i projekt systemu | rozdz. 2, 3, 4 (+ decyzje 2.3) |
-| Implementacja | rozdz. 3, 4, 5 (guardy jako studium przypadków) |
-| Bezpieczeństwo | rozdz. 6 (+ historia 4 luk z testów) |
-| Testowanie | rozdz. 7 (4 poziomy) |
-| Ewaluacja / wyniki | rozdz. 8 (tabela liczb), 9 (dyskusja ograniczeń) |
-| Wnioski i kierunki rozwoju | rozdz. 11, FAQ („największy wniosek") |
-
-> **Plan nauki (2026-07-07):** rano — rozdz. 1–4 + pytania kontrolne;
-> południe — canvas n8n na żywo (localhost:5678) węzeł po węźle + rozdz. 5;
-> popołudnie — rozdz. 6–8 + przećwiczenie FAQ na głos.
