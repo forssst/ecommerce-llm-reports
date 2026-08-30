@@ -100,10 +100,3 @@ prompt (reguły) → `_clean_sql` (normalizacja) → guardy przed wykonaniem
 (relative-date) → wykonanie ROLĄ READONLY → walidacja kształtu → retry
 z błędem → pominięcie z ostrzeżeniem → bramka 0 wykresów. Kompromitacja
 jednej warstwy NIE kompromituje systemu.
-
-## Sprawdź się
-1. Dla każdej z 4 luk: jak ją WYKRYTO (co konkretnie zawiódłby zwykły klik w UI)?
-2. Dlaczego losowa nazwa pliku jest lepsza niż sanityzacja nazwy?
-3. Rozpisz warstwy defense-in-depth dla złego SQL-a — minimum 5.
-4. Co dokładnie daje `ALTER DEFAULT PRIVILEGES` i jaką dziurę by zostawiło jego pominięcie?
-5. Obroń decyzję „internal bez auth" trzema argumentami i podaj produkcyjną alternatywę.

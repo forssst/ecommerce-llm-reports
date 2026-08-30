@@ -155,11 +155,3 @@ wewnątrz sieci docker (bez JWT — granica zaufania):
 Endpointy `/internal/...` nie mają uwierzytelniania — są osiągalne wyłącznie
 z sieci dockerowej (nie są publikowane na hoście przez żaden routing frontendu).
 Świadomy kompromis dla lokalnego demo; produkcyjnie: wewnętrzny token/mTLS.
-
-## Sprawdź się
-1. Dlaczego restart backendu nie wystarcza po zmianie `main.py`?
-2. Wymień 3 rzeczy, które dzieją się przy starcie backendu (import modułu).
-3. Co dokładnie oznacza wartość `u2_northwind` w kolumnie `file_path` i gdzie
-   ta wartość podróżuje dalej (przez jakie pola/parametry)?
-4. Które połączenie z Postgresem używa roli `analyst`, a które `readonly` — i dlaczego?
-5. Czemu `MB_*` w compose to martwe zmienne?

@@ -26,7 +26,7 @@ Kluczowe reguły i ich rodowody:
   „UZYTKOWNIK ZADA DOKLADNIE N WYKRESOW W TEJ KOLEJNOSCI: (1) chart_type=bar..."
   (budowane w `/internal/plan-prompt` z `_parse_requested_charts`); bez wyboru
   (2026-07-24, było „Wygeneruj 3-4 roznorodne wykresy (bar, line, pie, table)"
-  [→ punkt 6 promotora: 12/13 dashboardów 3-wykresowych miało DOKŁADNIE zestaw
+  [→ przyczyna: 12/13 dashboardów 3-wykresowych miało DOKŁADNIE zestaw
   {bar, line, pie} niezależnie od treści promptu — instrukcja kazała być
   „różnorodnym", nie dobierać formy do treści, patrz `docs/09` §6]) — teraz
   jawne kryterium per pod-cel: trend→line, ranking/TOP N→bar, udział ≤5-6
@@ -130,11 +130,3 @@ lepiej z polskimi celami — sqlcoder odłożony, infrastruktura została.
 WSZYSTKIE placeholdery z `_PROMPT_PLACEHOLDERS[klucz]` — inaczej 400.
 Bez tego literówka w edytowanym szablonie wywalałaby `KeyError` dopiero
 w środku generowania.
-
-## Sprawdź się
-1. Wskaż 3 reguły promptów, które mają „bliźniaczy" guard w kodzie — i powiedz,
-   czemu sama reguła nie wystarcza.
-2. Skąd wzięło się `_lenght` (z literówką) w regułach?
-3. Dlaczego `{clarification}` musi być na KOŃCU szablonu enhance?
-4. Który hint zawiera gotowy wzorzec SQL z `LAG()` i czemu akurat ten typ?
-5. Co dokładnie waliduje `PUT /prompts` i przed czym to chroni?

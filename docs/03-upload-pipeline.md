@@ -96,10 +96,3 @@ bazę, danych nie ma) → kaskada mylących objawów (opis AI „nie dostał sch
 - Import jednowątkowy; olist (~100k wierszy, 9 tabel) wchodzi w kilkanaście
   sekund — akceptowalne.
 - Duplikaty NAZW arkuszy/tabel po sanityzacji nadpisują się nawzajem (rzadkie).
-
-## Sprawdź się
-1. Które dwa mechanizmy (nie „walidacje"!) eliminują path traversal i zapchanie dysku?
-2. Czemu czytamy plik po 1 MB zamiast `await file.read()` w całość?
-3. Opisz dwutorową detekcję dat i po co rollback przy rzutowaniu.
-4. Co dokładnie psuło się przez brak upsertu? Odtwórz łańcuch: upload → upload → delete → objaw.
-5. Dlaczego wszystkie kolumny są lowercase i JAKIE DWA inne miejsca w systemie muszą o tym wiedzieć?

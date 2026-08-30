@@ -151,10 +151,3 @@ przez frontend. Kandydat do usunięcia.
   `OllamaResponseError` (rozróżnienie: niedostępna vs zła odpowiedź) → 503/500.
 - `/generate` NIGDY nie rzuca 500 dla błędów pipeline'u — zwraca
   `{"status":"error", ...}` (frontend ma jedną ścieżkę renderowania błędu).
-
-## Sprawdź się
-1. Prześledź drogę hasła od formularza do bazy. Co jest mylące w nazwie pola?
-2. Co dokładnie sprawdza `jwt.decode` i co się stanie po 7 dniach?
-3. Dlaczego `/generate` przyjmuje `user_id` w body, skoro go ignoruje?
-4. Skąd frontend bierze schemat do `schema_text` i czemu jest on zawsze aktualny?
-5. Jakie dwa nagłówki/statusy odróżniają „nie zalogowany" od „nie twój zasób"?

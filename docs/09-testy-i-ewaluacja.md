@@ -115,12 +115,12 @@ Diagnoza: porażki to trafienia w sztywny timeout 120 s pojedynczego wywołania
 (ówczesny `n8n_timeout`); żądania, które ZDĄŻYŁY, trwały PONAD 120 s → model
 by je obsłużył przy większym budżecie. Granica: **między N=3 a N=5**, przyczyna
 konkretna, nie „niestabilność". Wyniki CSV: `stress_test_results_*.csv`
-(gitignore; kopia w głównym repo), wykres: artifact z sesji 2026-07-05.
+(gitignore; kopia w głównym repo). Pomiar z 2026-07-05.
 
-## 6. Ocena zgodności z dobrymi praktykami wizualizacji (uwaga promotora, punkt 6)
+## 6. Ocena zgodności z dobrymi praktykami wizualizacji
 
-Promotor zapytał, czy dobór typów i układu wykresów jest zgodny z dobrymi praktykami
-wizualizacji danych — nie tylko „czy działa technicznie". Metoda: przegląd 30 kart
+Przedmiotem tej sekcji jest pytanie, czy dobór typów i układu wykresów jest zgodny z dobrymi
+praktykami wizualizacji danych — nie tylko „czy działa technicznie". Metoda: przegląd 30 kart
 typu pie/line z 20 ostatnio wygenerowanych dashboardów (Metabase API, `/api/dashboard/{id}`
 + `/api/card/{id}/query` — pobrane bezpośrednio wyniki zapytań, nie tylko definicje kart)
 wobec zasad doboru formy wykresu opartych na literaturze przedmiotu (bibliografia w
@@ -281,11 +281,10 @@ przekształcenia SQL pokazać jako `bar` 1:1, więc tam retry na SQL wciąż jes
   "chart_type": "pie", ...}` bez zmian — potwierdza, że fallback uruchamia się TYLKO przy
   realnym przekroczeniu limitu, nie zawsze.
 
-### Piąty problem: słupkowy też może mieć za dużo kategorii — znalezione przez usera, nie przeze mnie
+### Piąty problem: słupkowy też może mieć za dużo kategorii
 
 Poprawka wyżej (pie→bar) milcząco zakładała, że `bar` w ogóle nie ma problemu z kardynalnością.
-**To założenie obalił bezpośrednio ręczny test usera** (nie test automatyczny) w tej samej
-sesji: prompt „Pokaż ranking najlepiej sprzedających się produktów oraz ranking najlepszych
+**Założenie to obalił test manualny**, a nie automatyczny: prompt „Pokaż ranking najlepiej sprzedających się produktów oraz ranking najlepszych
 klientów..." na bazie `sklep_testowy.csv`, BEZ ręcznego wyboru typu wykresu (AI miało dobrać
 samo) → karta „Ranking najlepiej sprzedających się produktów" wyrenderowała się jako słupkowy
 z kilkudziesięcioma cieniutkimi słupkami malejącymi od ~270 000 do blisko zera — nieczytelny,
@@ -310,7 +309,7 @@ konwersja pie→bar sprawdza NAJPIERW, czy słupkowy z tymi samymi danymi sam pr
 dawniej, żeby SQL rzeczywiście ograniczył wynik, zamiast podać nieczytelny wykres jako „ok".
 
 **Zweryfikowane bezpośrednio na żywym endpoincie**, odtwarzając dokładnie przypadek z testu
-usera (`u2_superstore.orders`, 1849 unikalnych `product_name`):
+manualnego (`u2_superstore.orders`, 1849 unikalnych `product_name`):
 - `bar` + `GROUP BY product_name` (1849 kategorii) → `ok=false`, błąd z podpowiedzią
   `LIMIT 20` / agregacja do „Inne" — dokładnie to, czego brakowało w oryginalnym znalezisku;
 - kontrolnie `bar` + `GROUP BY segment` (5 kategorii) → `ok=true`, bez zmian;
@@ -325,16 +324,16 @@ usera (`u2_superstore.orders`, 1849 unikalnych `product_name`):
   dużej kardynalności, tam gdzie żaden typ wykresu tego nie uratuje bez realnego ograniczenia
   SQL. Pełny pakiet testów regresyjnych po zmianie: bez regresji (patrz historia commitów).
 
-**Why to jest dobry materiał na obronę:** to jedyne z pięciu znalezisk w tym rozdziale, które
-NIE wyszło z mojego przeglądu kart Metabase, tylko z samodzielnego, naiwnego testowania przez
-usera jako zwykłego użytkownika (bez wiedzy, co system powinien czy nie powinien zrobić) —
-dokładnie to, o co prosił promotor w metazadaniu „przejdź aplikację od zera".
+**Znaczenie tego znaleziska:** jako jedyne z pięciu opisanych w tym rozdziale nie pochodzi
+z systematycznego przeglądu kart Metabase, lecz ze swobodnego przejścia przez aplikację
+z perspektywy zwykłego użytkownika, bez wiedzy o tym, co system powinien, a czego nie powinien
+zrobić. Pokazuje to, że oba tryby testowania wykrywają inne klasy błędów.
 
 ## 7. Test wielu niepowiązanych źródeł po multi-upload (Olist + sklep_testowy)
 
-Multi-upload (punkt 5 promotora, patrz sekcja 2 i commit `dffc964`) był dotąd testowany na
+Multi-upload (patrz sekcja 2) był dotąd testowany na
 źródłach, które MIAŁY sens złączone (produkty/klienci/zamówienia tego samego sklepu — sekcja 2,
-blok J). User rozszerzył test 2026-07-27 o scalenie dwóch domenowo NIEPOWIĄZANYCH baz w jeden
+blok J). Test rozszerzono 2026-07-27 o scalenie dwóch domenowo NIEPOWIĄZANYCH baz w jeden
 schemat: `olist` (prawdziwy marketplace, 9 tabel, ~100k wierszy: customers, orders, order_items,
 products, sellers, payments, reviews, geolocation, category_translation) i `sklep_testowy`
 (syntetyczna, 1 tabela, 7 kolumn) — bez żadnego wspólnego klucza. UI nie wymaga i niczym nie
@@ -343,8 +342,7 @@ albo świadomie „na granicy" połączenie niepowiązanych zbiorów) jest realn
 użytkownika, nie tylko sztuczny na potrzeby testu. Cel: sprawdzić, co robi system, gdy prompt
 zakłada relację między źródłami, której fizycznie nie da się wyrazić SQL-em.
 
-Ten test wiąże się wprost z otwartym **punktem 7 uwag promotora** („weryfikacja wykres↔surowe
-dane") — dostarcza konkretny, udokumentowany przypadek, w którym karta na dashboardzie
+Ten test dotyczy wprost zagadnienia **weryfikacji zgodności wykresu z surowymi danymi** — dostarcza konkretny, udokumentowany przypadek, w którym karta na dashboardzie
 prezentuje coś innego niż to, o co user faktycznie prosił, a jedynym sposobem to wykryć jest
 ręczne porównanie tytułu i wykresu z surowym SQL (przycisk „Pokaż SQL"). System dziś nie ma
 żadnego automatycznego sygnału „ta karta nie odpowiada part promptu X" — cały ciężar wykrycia
@@ -480,9 +478,8 @@ pod kątem semantycznej integralności PRZY SCALANIU (nie integralności pojedyn
 integralności wykres↔dane z bloku K) — pokazuje granicę tego, co multi-upload (punkt 5) może
 zrobić bezpiecznie: działa dobrze, gdy prompt sam rozdziela źródła, i psuje się na dwa różne
 sposoby (cichy fallback, jawna porażka z błędną etykietą), gdy prompt zakłada relację, której
-fizycznie nie ma. Jest to też bezpośredni, konkretny materiał dowodowy do punktu 7 uwag
-promotora, który wcześniej nie miał żadnego udokumentowanego przypadku poza ogólnym
-sformułowaniem tematu.
+fizycznie nie ma. Jest to zarazem pierwszy udokumentowany przypadek rozjazdu między tytułem
+karty a treścią jej zapytania — zagadnienie sygnalizowane wcześniej wyłącznie ogólnie.
 
 **Zrzuty do przygotowania — podsumowanie:** 7.1 (lista tabel `frank`), 7.2 (dashboard testu 3,
 brak ostrzeżenia), 7.3 (karta+SQL testu 5, rozjazd tytuł↔SQL). Sugerowana lokalizacja plików
@@ -497,16 +494,3 @@ brak ostrzeżenia), 7.3 (karta+SQL testu 5, rozjazd tytuł↔SQL). Sugerowana lo
 | harness | „jak CZĘSTO system daje działający wynik i jakim kosztem?" (powtarzalne liczby) |
 | golden set | „czy wynik jest PRAWDZIWY, nie tylko wykonywalny?" |
 | stress | „ile równoczesności wytrzyma i CZEMU tyle?" |
-
-## Sprawdź się
-1. Czemu pytest bije w żywe API zamiast TestClient — co zyskujemy, co tracimy?
-2. Wskaż w tabeli harnessu 3 najgorsze przypadki i powiąż je z ograniczeniami z docs/06,09.
-3. Czym różni się werdykt VALUES od EXACT i jaki realny przypadek go wymusił?
-4. Odtwórz diagnozę stress-testu: skąd wiadomo, że winny jest timeout, a nie model?
-5. Który poziom testów znalazł halucynowane wartości kolumn i CZEMU tylko on mógł?
-6. Karta 132/377 miała poprawny SQL i poprawny tytuł, a mimo to była złym wykresem —
-   wyjaśnij, czym różni się ten błąd od „tytuł≠SQL", i dlaczego `_check_category_cardinality`
-   musiał liczyć DISTINCT na pełnym wyniku, a nie na 5-wierszowej próbce jak reszta guardów.
-7. W teście na scalonej bazie Olist+sklep_testowy, dwa prompty żądające połączenia
-   niepowiązanych źródeł zawiodły na różne sposoby (test 3 vs test 5) — wyjaśnij różnicę i
-   który tryb awarii jest groźniejszy dla użytkownika, który nie zna wnętrza systemu.

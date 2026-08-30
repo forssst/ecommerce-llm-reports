@@ -1,11 +1,10 @@
 # 11 — Analiza konkurencji: przegląd istniejących rozwiązań NL-to-SQL / auto-dashboard (deep dive)
 
 > Część serii `docs/`. Przegląd całości: `DOKUMENTACJA.md`.
-> Materiał do rozdziału 2.2 pracy (`Teoria/PLAN_PRACY.md`) — realizacja punktu 8 z uwag
-> promotora ze spotkania 2026-07-08 (przekazanych 2026-07-23): brakujący przegląd istniejących
-> rozwiązań działających na podobnej zasadzie. Research zrobiony 2026-07-24 — rynek AI-BI
-> zmienia się szybko (patrz np. wycofanie Power BI Q&A poniżej), przed wysyłką pracy warto
-> zweryfikować, czy opisane funkcje/ceny się nie zmieniły.
+> Przegląd istniejących rozwiązań działających na podobnej zasadzie, stanowiący podstawę
+> podrozdziału 2.2 pracy. Stan rozpoznania: 2026-07-24. Rynek narzędzi AI-BI zmienia się
+> szybko (patrz np. wycofanie Power BI Q&A poniżej), więc opisane funkcje i modele cenowe
+> wymagają weryfikacji przy każdym późniejszym wykorzystaniu tego zestawienia.
 
 ## 1. Kryteria porównania
 
@@ -98,21 +97,11 @@ semantycznego), kosztem mniejszej kontroli nad tym, jak model rozumie dane.
 ## 5. Kontekst akademicki (uzupełnienie, nie zamiennik powyższego)
 
 Powyższe to narzędzia PRODUKCYJNE. Równolegle istnieje osobny nurt akademicki — benchmarki
-text-to-SQL takie jak Spider i Spider 2.0 (już omówione z promotorem — `golden_set.py`
-w tym projekcie jest metodologicznie "mini-Spider po polsku", patrz `docs/09` pkt 4).
+text-to-SQL takie jak Spider i Spider 2.0 (`golden_set.py` w tym projekcie jest
+metodologicznie "mini-Spider po polsku", patrz `docs/09` pkt 4).
 Różnica: benchmarki oceniają samo tłumaczenie pojedynczego pytania na SQL na gotowej,
 zwykle anglojęzycznej bazie referencyjnej — nie generowanie całego dashboardu z wielu
 wykresów ani obsługę danych samodzielnie wgrywanych przez użytkownika.
-
-## Sprawdź się
-1. Które z porównanych narzędzi nie wymaga połączenia z chmurą — i dlaczego to i tak
-   nie czyni go pełnym odpowiednikiem tego projektu?
-2. Dlaczego akurat Metabase AI/Metabot jest „najważniejszym punktem odniesienia" spośród
-   wszystkich porównanych narzędzi?
-3. Czym różni się podejście WrenAI (MDL) od podejścia Vanna.ai (RAG nad przykładami) —
-   i do którego z nich bliżej jest sposobowi, w jaki ten projekt buduje `schema_text`
-   i opis bazy (`_describe_schema`)?
-4. Czym różni się cel benchmarków Spider/Spider 2.0 od celu `golden_set.py` w tym projekcie?
 
 ## Źródła
 - [Best AI Analytics Platforms: 13 Tools Reviewed (2026) — Holistics](https://www.holistics.io/blog/ai-analytics-platforms/)

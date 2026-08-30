@@ -114,11 +114,3 @@ POST /api/dataset {"type":"native","database":14,"native":{"query":"SELECT 1"}}
 POST /api/card/{id}/query {"parameters":[{"type":"date/single",
   "target":["variable",["template-tag","start_date"]],"value":"2024-02-01"}]}
 ```
-
-## Sprawdź się
-1. Po co `currentSchema` w details źródła i co by było bez niego?
-2. Dlaczego typ template-taga `text` psuł filtr, skoro karta się tworzyła?
-3. Wytłumacz składnię `[[AND ...]]` i wzorzec `WHERE 1=1`.
-4. Jak wygląda pełna droga od „user wybrał 2024-02-01 w widgecie" do
-   zmienionego SQL-a karty?
-5. Co czyta `Zbuduj Układ` i czemu w dwóch miejscach?

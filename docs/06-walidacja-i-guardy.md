@@ -76,7 +76,7 @@ sample = cur.fetchmany(5)                     # próbka do dalszych guardów
   NIE wystarcza sobie próbką 5 wierszy z `_run_and_validate` — dolicza
   `SELECT COUNT(DISTINCT kolumna) FROM (sql) AS sub` na PEŁNYM wyniku, na tym
   samym, jeszcze otwartym połączeniu, zanim `conn.close()`. Rodowód: analiza
-  punktu 6 uwag promotora (docs/09 §6) — realne dashboardy z 165-kategoriowym
+  przeglądu opisanego w `docs/09` §6 — realne dashboardy z 165-kategoriowym
   wykresem kołowym (Metabase zwija ogon w „Other" = 78% całości, co i tak
   czyni wykres bezużytecznym) i 25-seriowym wykresem liniowym (nieczytelny
   „spaghetti chart"), zweryfikowane też wizualnie w przeglądarce. Odróżnia się
@@ -159,12 +159,3 @@ n8n:       retry planu (IF), pętla 3 prób SQL, bramka 0 wykresów,
            dobór kolumny daty per wykres, typ tagów 'date'
 postgres:  rola readonly (guard ostateczny)
 ```
-
-## Sprawdź się
-1. Dlaczego `_RELATIVE_DATE_FILTER` musi działać PRZED wykonaniem, a guard
-   0 wierszy PO wykonaniu?
-2. Jak licznik głębokości nawiasów ratuje CTE przed ucięciem?
-3. Opisz błąd pierwszej wersji guardu „zgubiony TOP N" i czemu był podstępny.
-4. Które DWA guardy mają znaną, nazwaną granicę skuteczności i jaką?
-5. Wybierz dowolny wiersz z mapy §10 i uzasadnij, czemu ten guard mieszka
-   właśnie tam, a nie warstwę wyżej/niżej.

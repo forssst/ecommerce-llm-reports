@@ -86,12 +86,3 @@ runEnhance(q, a):
 - Znany dług techniczny: `generateDescription()` i `runEnhance()` mają
   zduplikowaną obsługę describe-schema (dwa miejsca robiące to samo —
   naprawiliśmy objaw, refaktor do wspólnej funkcji świadomie odłożony).
-
-## Sprawdź się
-1. Co dokładnie trzyma localStorage i jak frontend reaguje na 401?
-2. Odtwórz kontrakt stringa `chart_type` między `buildChartType()` a
-   `_parse_requested_charts` — czemu to string, nie tablica?
-3. Kiedy runEnhance NIE wygeneruje nowego opisu?
-4. Jak działa „otwórz ponownie" z historii, skoro backend nie ma endpointu
-   „get dashboard"?
-5. Wskaż przykład długu technicznego frontendu i jego koszt (miałeś go w testach!).

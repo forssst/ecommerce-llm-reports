@@ -165,11 +165,3 @@ Pułapki znalezione w praktyce:
 - Dane wykonań (`/rest/executions/{id}`) są serializowane biblioteką
   `flatted` — surowy JSON to tablica indeksów; dekodować:
   `docker exec n8n_local node -e "console.log(JSON.stringify(require('flatted').parse(...)))"`.
-
-## Sprawdź się
-1. Odtwórz kontrakt wejścia i wyjścia webhooka z pamięci.
-2. Które trzy guardy wykonują się w `process-sql-attempt` PRZED wykonaniem SQL,
-   a które dwa PO wykonaniu?
-3. Dlaczego dopasowanie kolumny daty musi być per wykres? Podaj bazę-kontrprzykład.
-4. Jaki dokładnie objaw ma niezawołanie `activate` po `PATCH`?
-5. Czemu retry planu NIE jest pętlą, a retry SQL-a jest?
