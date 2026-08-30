@@ -8,22 +8,31 @@
   generowanie po prostu trwa dłużej.
 - ok. 10 GB wolnego miejsca (obrazy kontenerów + model językowy ~4,7 GB)
 
-## 1. Sklonuj repozytorium
+## 1. Przygotuj katalog projektu
+
+Jeśli projekt został przekazany jako **gotowy katalog** (pendrive, archiwum, płyta) —
+skopiuj go w wybrane miejsce, wejdź do niego i **przejdź od razu do kroku 2**.
+
+Jeśli masz dostęp do repozytorium i wolisz je sklonować:
 
 ```bash
 git clone https://github.com/forssst/ecommerce-llm-reports.git
 cd ecommerce-llm-reports
 ```
 
-Repozytorium jest prywatne, więc przy logowaniu podaj **Personal Access Token** zamiast
-hasła (GitHub → Settings → Developer settings → Personal access tokens (classic),
-zakres `repo`). Token wklejasz w miejscu hasła.
+Repozytorium jest prywatne — przy logowaniu w miejsce hasła podaje się **Personal Access
+Token** (GitHub → Settings → Developer settings → Personal access tokens (classic),
+zakres `repo`); GitHub nie przyjmuje już hasła do konta przy operacjach gitowych.
 
 ## 2. Utwórz plik `.env`
 
 ```bash
 cp .env.example .env
 ```
+
+Jeśli pliku `.env.example` nie ma (zaczyna się od kropki, więc bywa pomijany przy
+kopiowaniu przez menedżera plików), utwórz `.env` ręcznie z trzema liniami:
+`METABASE_USER=`, `METABASE_PASSWORD=`, `METABASE_PUBLIC_URL=http://localhost:3000`.
 
 Uzupełnij dwie zmienne — **bez nich backend celowo nie wystartuje**:
 
