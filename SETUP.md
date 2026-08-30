@@ -38,6 +38,29 @@ Jeśli pliku `.env.example` nie ma (zaczyna się od kropki, więc bywa pomijany 
 kopiowaniu przez menedżera plików), utwórz `.env` ręcznie z trzema liniami:
 `METABASE_USER=`, `METABASE_PASSWORD=`, `METABASE_PUBLIC_URL=http://localhost:3000`.
 
+Plik musi nazywać się dokładnie `.env` — Compose wczytuje automatycznie tylko taką nazwę.
+Na Windowsie najprościej utworzyć go z PowerShella, bo Eksplorator utrudnia nazwy
+zaczynające się od kropki, a Notatnik dopisuje `.txt`:
+
+```powershell
+@"
+METABASE_USER=twoj@email
+METABASE_PASSWORD=twoje_haslo
+METABASE_PUBLIC_URL=http://localhost:3000
+"@ | Set-Content -Path .env -Encoding ascii
+```
+
+`-Encoding ascii` jest istotne: domyślne kodowanie PowerShella wstawia na początku pliku
+znacznik BOM, przez który pierwsza zmienna nie zostanie odczytana.
+
+Sprawdzenie, czy plik został wczytany:
+
+```bash
+docker compose config | grep METABASE
+```
+
+W wyniku muszą być widoczne wartości, a nie puste miejsca.
+
 Uzupełnij dwie zmienne — **bez nich backend celowo nie wystartuje**:
 
 | zmienna | co wpisać |
@@ -157,7 +180,7 @@ Przykładowe zbiory testowe są w katalogu `pliki_testowe/`.
 
 | objaw | przyczyna |
 |---|---|
-| backend nie startuje, w logach `Brak METABASE_USER / METABASE_PASSWORD` | nie ma pliku `.env` albo zmienne są puste |
+| kontener `fastapi_backend` w pętli restartów, w logach `Brak METABASE_USER / METABASE_PASSWORD` | nie ma pliku `.env`, ma złą nazwę (`.env.txt`, `test.env`) albo zmienne są puste; `restart: always` podnosi kontener w kółko, więc objawem jest ciągłe „restarting" |
 | backend startuje, ale generowanie kończy się błędem logowania do Metabase | konto w Metabase nie zgadza się z `.env` |
 | `There was a problem displaying this chart` | karta celuje w bazę, której Metabase nie ma podłączonej — sprawdź, czy backend zarejestrował ją automatycznie |
 | Metabase wpada w pętlę restartów | `JAVA_OPTS` musi mieć `-Xms` nie większe niż `-Xmx` |
