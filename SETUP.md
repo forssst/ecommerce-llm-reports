@@ -26,6 +26,9 @@ zakres `repo`); GitHub nie przyjmuje już hasła do konta przy operacjach gitowy
 
 ## 2. Utwórz plik `.env`
 
+W **katalogu głównym projektu**, czyli tam, gdzie leży `docker-compose.yml` — Docker Compose
+szuka tego pliku właśnie tam i nigdzie indziej:
+
 ```bash
 cp .env.example .env
 ```
