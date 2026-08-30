@@ -1,6 +1,7 @@
 # Sekrety
 .env
 .env.*
+!.env.example
 
 # Python
 __pycache__/
@@ -57,3 +58,10 @@ tests/.pytest_cache/
 __pycache__/
 eval_results_*.csv
 golden_set_results_*.csv
+
+# Notatka z tematem pracy (zawierala sekrety - nie commitowac)
+praca
+temat_pracy.txt
+
+# Katalog z kopia do oddania (budowany na zadanie, nie kod)
+oddanie/

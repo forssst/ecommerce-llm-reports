@@ -119,11 +119,10 @@ services:
     volumes:
       - ./data:/data
     environment:
-      - MB_URL=http://metabase:3000
-      - MB_PUBLIC_URL=${MB_PUBLIC_URL}
-      - MB_USER=${MB_USER}
-      - MB_PASS=${MB_PASS}
-      - MB_DATABASE_ID=${MB_DATABASE_ID}
+      - METABASE_URL=http://metabase:3000
+      - METABASE_PUBLIC_URL=${METABASE_PUBLIC_URL:-http://localhost:3000}
+      - METABASE_USER=${METABASE_USER}
+      - METABASE_PASSWORD=${METABASE_PASSWORD}
       - PG_HOST=postgres
       - PG_DB=analytics
       - PG_USER=analyst

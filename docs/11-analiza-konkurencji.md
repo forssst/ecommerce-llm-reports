@@ -10,7 +10,7 @@
 ## 1. Kryteria porównania
 
 Dla każdego narzędzia sprawdzono to, co odróżnia ten projekt od reszty rynku (patrz
-`CLAUDE.md` — architektura jest CELOWO lokalna):
+`DOKUMENTACJA.md`, sekcja o założeniach — architektura jest CELOWO lokalna):
 
 1. Czy działa lokalnie/offline, bez wysyłania danych do zewnętrznej chmury.
 2. Czy z JEDNEGO polecenia w języku naturalnym powstaje CAŁY dashboard złożony z wielu

@@ -35,7 +35,7 @@
         "url": "http://metabase:3000/api/session",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\"username\": \"szymonforstkl3trgwitam@gmail.com\", \"password\": \"Szym0nMetabase\"}",
+        "jsonBody": "{\"username\": \"WPISZ_EMAIL_ADMINA_METABASE\", \"password\": \"WPISZ_HASLO_ADMINA_METABASE\"}",
         "options": {}
       },
       "id": "580ff816-f284-42c3-b1d7-4927348943eb",

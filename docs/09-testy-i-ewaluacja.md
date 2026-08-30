@@ -443,7 +443,7 @@ o myleniu limitów).
 
 Wspólny mianownik testów 2, 3, 4 i 5: system NIE wie i nigdzie nie zapisuje, czy tabele
 wgrane razem w ramach multi-upload są ze sobą w jakikolwiek sposób powiązane (wspólny klucz,
-wspólna domena) — `schema_json` (patrz architektura danych w `CLAUDE.md`) opisuje tylko
+wspólna domena) — `schema_json` (patrz `docs/01-architektura-i-dane.md`, sekcja 3) opisuje tylko
 strukturę KAŻDEJ tabeli osobno, nie relacje MIĘDZY tabelami z różnych plików źródłowych. Model
 dostaje więc do dyspozycji schemat 10 tabel bez żadnej wskazówki, że `olist__*` i
 `sklep_testowy__*` to w istocie dwa niepowiązane światy — i musi to „odgadnąć" wyłącznie z nazw

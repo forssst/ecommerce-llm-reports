@@ -54,8 +54,15 @@ app.add_middleware(
 
 METABASE_URL = os.getenv("METABASE_URL", "http://metabase:3000")
 METABASE_PUBLIC_URL = os.getenv("METABASE_PUBLIC_URL", "http://localhost:3000")
-METABASE_USER = os.getenv("METABASE_USER", "szymonforstkl3trgwitam@gmail.com")
-METABASE_PASSWORD = os.getenv("METABASE_PASSWORD", "Szym0nMetabase")
+# Konto administracyjne Metabase. Bez wartosci domyslnych - dane logowania nie moga
+# trafic do repozytorium. Ustawiane przez plik .env (patrz .env.example).
+METABASE_USER = os.getenv("METABASE_USER", "")
+METABASE_PASSWORD = os.getenv("METABASE_PASSWORD", "")
+if not METABASE_USER or not METABASE_PASSWORD:
+    raise RuntimeError(
+        "Brak METABASE_USER / METABASE_PASSWORD. Utworz plik .env na podstawie "
+        ".env.example i wpisz dane konta administratora Metabase."
+    )
 # Katalog, w ktorym kontener Metabase widzi wgrane pliki baz (ten sam wolumen co UPLOAD_DIR).
 METABASE_DB_DIR = os.getenv("METABASE_DB_DIR", "/data/uploads")
 UPLOAD_DIR = "/data/uploads"
