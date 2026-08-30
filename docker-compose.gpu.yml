@@ -1,0 +1,21 @@
+# Nakladka wlaczajaca akceleracje GPU (NVIDIA) dla kontenera Ollama.
+#
+# Uzycie:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d ...
+#
+# Albo, zeby nie dopisywac tego za kazdym razem, w pliku .env:
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml     (Linux/macOS)
+#   COMPOSE_FILE=docker-compose.yml;docker-compose.gpu.yml     (Windows)
+#
+# Wymaga karty NVIDIA i sterownika kontenerowego (NVIDIA Container Toolkit,
+# a na Windowsie Docker Desktop z backendem WSL2 i sterownikiem obslugujacym CUDA).
+# Bez tej nakladki model dziala na CPU - wolniej, ale poprawnie.
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

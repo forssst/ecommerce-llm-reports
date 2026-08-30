@@ -4,8 +4,9 @@
 
 - Docker i Docker Compose
 - git
-- ok. 8 GB RAM (model 7B + Metabase). Karta graficzna nie jest wymagana — bez GPU
-  generowanie po prostu trwa dłużej.
+- ok. 8 GB RAM (model 7B + Metabase). Karta graficzna **nie jest wymagana** — domyślna
+  konfiguracja uruchamia model na CPU. Generowanie trwa wtedy dłużej, ale działa
+  poprawnie.
 - ok. 10 GB wolnego miejsca (obrazy kontenerów + model językowy ~4,7 GB)
 
 ## 1. Przygotuj katalog projektu
@@ -57,6 +58,39 @@ docker compose up -d --build ollama postgres metabase n8n fastapi_backend fronte
 > także usługę `task-runners`, która wymaga pliku `n8n-task-runners.json` nieobecnego
 > w repozytorium — build zakończy się błędem. Usługi `task-runners` i `streamlit`
 > to pozostałości wcześniejszych wersji i nie są potrzebne.
+
+### Akceleracja GPU (opcjonalnie)
+
+Domyślnie model działa na CPU, dzięki czemu system uruchamia się na dowolnej maszynie.
+Jeśli masz kartę NVIDIA ze sterownikiem kontenerowym, dołóż nakładkę:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build \
+    ollama postgres metabase n8n fastapi_backend frontend
+```
+
+Żeby nie dopisywać tego za każdym razem, można wpisać do `.env`:
+`COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml` (na Windowsie separatorem jest
+średnik zamiast dwukropka).
+
+### Windows i Docker Desktop
+
+- Uruchom Docker Desktop i poczekaj, aż ikona wieloryba przestanie się animować;
+  zalecany backend to **WSL2**.
+- Polecenia wpisuj w **PowerShell** albo w terminalu WSL. Działają bez zmian, z jednym
+  wyjątkiem: `curl` w PowerShellu jest aliasem innego polecenia, więc sprawdzenie
+  z kroku 7 wykonaj jako `curl.exe http://localhost:8000/health` albo po prostu otwórz
+  ten adres w przeglądarce.
+- Domyślny limit pamięci dla WSL2 bywa za niski dla modelu 7B razem z Metabase. Jeśli
+  kontenery są ubijane albo generowanie kończy się bez odpowiedzi, zwiększ limit w pliku
+  `C:\Users\<nazwa>\.wslconfig`:
+
+  ```ini
+  [wsl2]
+  memory=10GB
+  ```
+
+  a potem `wsl --shutdown` i ponowny start Docker Desktop.
 
 ## 4. Pobierz model językowy
 
@@ -130,6 +164,7 @@ Przykładowe zbiory testowe są w katalogu `pliki_testowe/`.
 | generowanie zwraca 404 z n8n | przepływ nie jest ustawiony jako *Active* |
 | dashboard nie powstaje, w n8n błąd 401 na węźle *Metabase Login* | nie uzupełniono danych logowania w tym węźle po imporcie (krok 6) |
 | generowanie pada na etapie planu, węzeł *Model Ollama (Plan)* zgłasza brak poświadczenia | nie utworzono poświadczenia Ollamy w n8n (krok 6) — nie jest ono częścią eksportu przepływu |
+| `could not select device driver "nvidia" with capabilities: [[gpu]]` | uruchomiono z nakładką `docker-compose.gpu.yml` (albo z `COMPOSE_FILE` w `.env`) na maszynie bez karty NVIDIA — pomiń nakładkę, model pójdzie na CPU |
 | build kończy się błędem na `task-runners` | uruchomiono `docker compose up` bez wymienienia usług (patrz krok 3) |
 
 Po każdej zmianie w kodzie backendu trzeba przebudować obraz:
