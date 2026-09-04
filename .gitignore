@@ -44,7 +44,6 @@ pliki_testowe/*.csv
 # Lokalne / generowane
 *.pdf
 file.json
-n8n-task-runners.json
 
 # zrzuty ekranu z testów manualnych (dane prywatne)
 screenyztestów/

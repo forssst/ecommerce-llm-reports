@@ -43,7 +43,6 @@ bazie → Metabase**.
 
 - `backend/` — API i logika aplikacji (FastAPI)
 - `frontend/` — interfejs użytkownika (React)
-- `streamlit_app/` — wcześniejsza wersja prototypu (Streamlit), obecnie nieużywana
 - `docker-compose.yml` — definicja usług
 - `n8n_orchestrator_workflow.json` — przepływ orkiestracji do zaimportowania w n8n
 - `docs/` — dokumentacja techniczna (architektura, prompty, walidacja, bezpieczeństwo)

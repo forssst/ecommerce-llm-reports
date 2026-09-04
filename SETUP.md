@@ -74,13 +74,11 @@ się nimi do jego API. To najczęstsza przyczyna błędów przy pierwszym urucho
 ## 3. Postaw usługi
 
 ```bash
-docker compose up -d --build ollama postgres metabase n8n fastapi_backend frontend
+docker compose up -d --build
 ```
 
-> **Wymień usługi po nazwie.** Samo `docker compose up -d --build` spróbuje zbudować
-> także usługę `task-runners`, która wymaga pliku `n8n-task-runners.json` nieobecnego
-> w repozytorium — build zakończy się błędem. Usługi `task-runners` i `streamlit`
-> to pozostałości wcześniejszych wersji i nie są potrzebne.
+> Plik `docker-compose.yml` definiuje dokładnie sześć usług potrzebnych do działania
+> systemu, więc samo `docker compose up -d --build` uruchomi komplet.
 
 ### Akceleracja GPU (opcjonalnie)
 
@@ -188,7 +186,6 @@ Przykładowe zbiory testowe są w katalogu `pliki_testowe/`.
 | dashboard nie powstaje, w n8n błąd 401 na węźle *Metabase Login* | nie uzupełniono danych logowania w tym węźle po imporcie (krok 6) |
 | generowanie pada na etapie planu, węzeł *Model Ollama (Plan)* zgłasza brak poświadczenia | nie utworzono poświadczenia Ollamy w n8n (krok 6) — nie jest ono częścią eksportu przepływu |
 | `could not select device driver "nvidia" with capabilities: [[gpu]]` | uruchomiono z nakładką `docker-compose.gpu.yml` (albo z `COMPOSE_FILE` w `.env`) na maszynie bez karty NVIDIA — pomiń nakładkę, model pójdzie na CPU |
-| build kończy się błędem na `task-runners` | uruchomiono `docker compose up` bez wymienienia usług (patrz krok 3) |
 
 Po każdej zmianie w kodzie backendu trzeba przebudować obraz:
 

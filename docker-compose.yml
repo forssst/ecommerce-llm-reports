@@ -27,24 +27,6 @@ services:
       - ./n8n_config:/home/node/.n8n
       - .:/home/node/data
 
-  task-runners:
-    build:
-      context: .
-      dockerfile: Dockerfile.runners # Wskazujemy nowy Dockerfile
-    container_name: n8n_runners
-    restart: always
-    environment:
-      - N8N_RUNNERS_TASK_BROKER_URI=http://n8n_local:5679
-      - N8N_RUNNERS_AUTH_TOKEN=2026k
-      # TA LINIA JEST KLUCZOWA:
-      - N8N_RUNNERS_CONFIG_FILE=/etc/n8n-task-runners.json
-    volumes:
-      - ./data:/home/node/csv_data
-      - ./metabase-data:/home/node/db_data
-    depends_on:
-      - n8n
-
-
   metabase:
     image: metabase/metabase:latest
     container_name: metabase
@@ -61,24 +43,6 @@ services:
       - MB_PLUGINS_DIR=/plugins
       - MB_DB_TYPE=h2
       - JAVA_OPTS=-Xms256m -Xmx1g
-
-  streamlit:
-    image: python:3.11-slim
-    container_name: streamlit_app
-    restart: always
-    working_dir: /app
-    ports:
-      - "8501:8501"
-    volumes:
-      - ./streamlit_app:/app
-    command: >
-      sh -c "pip install -q streamlit requests pandas &&
-             streamlit run app.py
-             --server.port=8501
-             --server.address=0.0.0.0
-             --server.headless=true"
-    depends_on:
-      - n8n
 
     
   frontend:

@@ -51,10 +51,6 @@
 - `API_URL` wskazuje `http://localhost:8000` — frontend gada z backendem
   Z PRZEGLĄDARKI (nie z kontenera), stąd localhost.
 
-### 1.7. Usługi legacy (ignorować)
-`streamlit` i `task-runners` — pozostałości wcześniejszych iteracji;
-`task-runners` nie zbuduje się na czystym klonie (gitignorowany config) —
-uruchamiać compose z jawną listą usług.
 
 ## 2. Zmienne konfiguracyjne backendu (wszystkie, z domyślnymi)
 
