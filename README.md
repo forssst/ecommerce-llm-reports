@@ -48,7 +48,6 @@ bazie → Metabase**.
 - `docs/` — dokumentacja techniczna (architektura, prompty, walidacja, bezpieczeństwo)
 - `tests/` — testy automatyczne (pytest, przeciwko działającemu API)
 - `pliki_testowe/` — dane i plan testów manualnych
-- `ollama_api_test.py` — pomocniczy skrypt testowy
 
 ## Uruchomienie
 
