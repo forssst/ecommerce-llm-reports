@@ -67,3 +67,6 @@ oddanie/
 
 # lokalny plik konfiguracyjny narzedzia deweloperskiego
 CLAUDE.md
+
+# surowe CSV Olista - w repozytorium jest wersja SQLite w pliki_testowe/
+archive/
