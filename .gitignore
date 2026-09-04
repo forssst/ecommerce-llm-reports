@@ -65,3 +65,6 @@ temat_pracy.txt
 
 # Katalog z kopia do oddania (budowany na zadanie, nie kod)
 oddanie/
+
+# lokalny plik konfiguracyjny narzedzia deweloperskiego
+CLAUDE.md

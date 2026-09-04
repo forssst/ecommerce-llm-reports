@@ -2,17 +2,6 @@
   "name": "Metabase - Utwórz Dashboard",
   "nodes": [
     {
-      "parameters": {},
-      "type": "n8n-nodes-base.stickyNote",
-      "position": [
-        560,
-        448
-      ],
-      "typeVersion": 1,
-      "id": "decea5d3-9861-454a-ab1a-e94e5acb7ab0",
-      "name": "Sticky Note"
-    },
-    {
       "parameters": {
         "httpMethod": "POST",
         "path": "create-dashboard",
@@ -24,28 +13,10 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "position": [
-        512,
-        -80
+        608,
+        704
       ],
       "webhookId": "1d6e711f-0d6c-4fe3-82f5-7d46cab106bc"
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "http://metabase:3000/api/session",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "{\"username\": \"WPISZ_EMAIL_ADMINA_METABASE\", \"password\": \"WPISZ_HASLO_ADMINA_METABASE\"}",
-        "options": {}
-      },
-      "id": "580ff816-f284-42c3-b1d7-4927348943eb",
-      "name": "Metabase Login",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4,
-      "position": [
-        736,
-        -80
-      ]
     },
     {
       "parameters": {
@@ -55,7 +26,7 @@
           "parameters": [
             {
               "name": "X-Metabase-Session",
-              "value": "={{ $('Metabase Login').item.json.id }}"
+              "value": "={{ $('Logowanie Metabase').item.json.id }}"
             }
           ]
         },
@@ -66,21 +37,21 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        960,
-        -80
+        752,
+        160
       ]
     },
     {
       "parameters": {
-        "jsCode": "const token = $('Metabase Login').item.json.id;\nconst dbPath = $('Webhook').item.json.body.db_path;\nconst dbName = dbPath.split('/').pop();\n\nconst resp = $input.item.json;\nconst dbArray = Array.isArray(resp) ? resp : (resp.data || []);\nconst found = dbArray.find(db => db.name === dbName);\n\nreturn [{\n  json: {\n    token,\n    db_name: dbName,\n    db_id: found ? found.id : null,\n    db_exists: !!found,\n    charts: $('Generuj SQL i Zbierz Wykresy').item.json.charts\n  }\n}];"
+        "jsCode": "const token = $('Logowanie Metabase').item.json.id;\nconst dbPath = $('Webhook').item.json.body.db_path;\nconst dbName = dbPath.split('/').pop();\n\nconst resp = $input.item.json;\nconst dbArray = Array.isArray(resp) ? resp : (resp.data || []);\nconst found = dbArray.find(db => db.name === dbName);\n\nreturn [{\n  json: {\n    token,\n    db_name: dbName,\n    db_id: found ? found.id : null,\n    db_exists: !!found,\n    charts: $('Generuj SQL i Zbierz Wykresy').item.json.charts\n  }\n}];"
       },
       "id": "83189c14-2e83-4798-a28e-9943b80d45bc",
       "name": "Sprawdź DB",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1184,
-        -80
+        752,
+        320
       ]
     },
     {
@@ -111,8 +82,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        1392,
-        -80
+        928,
+        32
       ]
     },
     {
@@ -130,7 +101,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({engine: 'postgres', name: $json.db_name, details: {host: 'postgres', port: 5432, dbname: 'analytics', user: 'readonly', password: 'readonly', ssl: false, 'additional-options': 'currentSchema=' + $json.db_name}, is_full_sync: true}) }}",
+        "jsonBody": "={{ JSON.stringify({engine: 'postgres', name: $json.db_name, details: {host: 'postgres', port: 5432, dbname: 'analytics', user: 'analyst', password: 'analyst', ssl: false, 'additional-options': 'currentSchema=' + $json.db_name}, is_full_sync: true}) }}",
         "options": {}
       },
       "id": "c552c349-8541-45f3-a312-3e2ef30be048",
@@ -138,8 +109,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        1616,
-        64
+        1088,
+        160
       ]
     },
     {
@@ -151,8 +122,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1840,
-        -80
+        1104,
+        32
       ]
     },
     {
@@ -178,8 +149,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        2064,
-        -80
+        1248,
+        32
       ]
     },
     {
@@ -191,8 +162,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2272,
-        -80
+        1392,
+        32
       ]
     },
     {
@@ -218,8 +189,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        2496,
-        -80
+        1520,
+        32
       ]
     },
     {
@@ -233,8 +204,8 @@
       "type": "n8n-nodes-base.aggregate",
       "typeVersion": 1,
       "position": [
-        2720,
-        -80
+        1296,
+        224
       ]
     },
     {
@@ -246,8 +217,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2944,
-        -80
+        1440,
+        224
       ]
     },
     {
@@ -273,8 +244,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        3152,
-        -80
+        1568,
+        224
       ]
     },
     {
@@ -300,8 +271,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        3376,
-        -80
+        1712,
+        48
       ]
     },
     {
@@ -324,14 +295,14 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        3600,
-        -80
+        1840,
+        48
       ]
     },
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ (() => { const g = $('Generuj SQL i Zbierz Wykresy').first().json; const sqlText = (g.charts || []).map(c => '-- ' + c.title + '\\n' + c.sql).join('\\n\\n'); return JSON.stringify({ url: 'http://localhost:3000/public/dashboard/' + $json.uuid, sql: sqlText, requested: g.requested, generated: (g.charts || []).length, failed: g.failed, failed_titles: g.failed_titles || [], retries: g.retries || 0 }); })() }}",
+        "responseBody": "={{ (() => { const g = $('Generuj SQL i Zbierz Wykresy').first().json; const sqlText = (g.charts || []).map(c => '-- ' + c.title + '\\n' + c.sql).join('\\n\\n'); return JSON.stringify({ url: 'http://localhost:3000/public/dashboard/' + $json.uuid, sql: sqlText, requested: g.requested, generated: (g.charts || []).length, failed: g.failed, failed_titles: g.failed_titles || [] }); })() }}",
         "options": {}
       },
       "id": "ef0a12fe-1c1d-4009-b3d9-f249ea757b64",
@@ -339,21 +310,21 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
       "position": [
-        3824,
-        -80
+        1728,
+        224
       ]
     },
     {
       "parameters": {
-        "jsCode": "const input = $input.first().json; // {specs, db_path, schema_text, user_prompt}\nconst BACKEND = 'http://fastapi_backend:8000';\nconst OLLAMA = 'http://ollama:11434';\nconst MODEL = 'qwen2.5-coder:7b';\n\nasync function callBackend(path, payload) {\n  return await this.helpers.httpRequest({\n    method: 'POST',\n    url: BACKEND + path,\n    body: payload,\n    json: true,\n  });\n}\n\nasync function callOllama(prompt) {\n  const r = await this.helpers.httpRequest({\n    method: 'POST',\n    url: OLLAMA + '/api/generate',\n    body: { model: MODEL, prompt: prompt, stream: false, format: 'json' },\n    json: true,\n    timeout: 180000,\n  });\n  return JSON.parse(r.response || '{}');\n}\n\nconst charts = [];\nconst failedTitles = [];\nlet totalRetries = 0;\nfor (const spec of input.specs) {\n  let sql = '', ok = false, err = '', cols = [], sample = [];\n  let resolvedChartType = spec.chart_type || '';\n  for (let attempt = 0; attempt < 3; attempt++) {\n    if (attempt > 0) totalRetries++;\n    const sqlPromptResp = await callBackend('/internal/sql-prompt', {\n      goal: spec.goal,\n      chart_type: spec.chart_type || '',\n      schema_text: input.schema_text,\n      prev_sql: sql,\n      prev_err: err,\n    });\n    const rawOut = await callOllama(sqlPromptResp.prompt);\n    const rawSql = (rawOut && rawOut.sql) || '';\n    const validated = await callBackend('/internal/process-sql-attempt', {\n      schema_name: input.db_path,\n      chart_type: spec.chart_type || '',\n      raw_sql: rawSql,\n      goal: spec.goal,\n    });\n    sql = validated.sql;\n    ok = validated.ok;\n    err = validated.error || '';\n    cols = validated.columns;\n    sample = validated.sample;\n    // backend moze zamienic typ (np. kolowy z za duza kardynalnoscia -> slupkowy przez\n    // _run_and_validate) - uzyj rozwiazanego typu przy finalizacji, nie oryginalnego z planu\n    if (validated.chart_type) resolvedChartType = validated.chart_type;\n    if (ok && sql) break;\n  }\n  if (!ok || !sql) { failedTitles.push(spec.title); continue; }\n  const finalized = await callBackend('/internal/finalize-chart', {\n    title: spec.title,\n    sql: sql,\n    chart_type: resolvedChartType,\n    columns: cols,\n    sample: sample,\n    user_prompt: input.user_prompt,\n  });\n  charts.push({ title: finalized.title, sql: sql, display: finalized.display, columns: cols });\n}\n\nconst dateColResp = await this.helpers.httpRequest({\n  method: 'GET',\n  url: BACKEND + '/internal/date-column?schema_name=' + encodeURIComponent(input.db_path),\n  json: true,\n});\n\nreturn [{\n  json: {\n    charts: charts,\n    db_path: input.db_path,\n    user_prompt: input.user_prompt,\n    date_columns: dateColResp.date_columns || [],\n    requested: input.specs.length,\n    failed: input.specs.length - charts.length,\n    failed_titles: failedTitles,\n    retries: totalRetries,\n  },\n}];"
+        "jsCode": "const input = $input.first().json; // {specs, db_path, schema_text, user_prompt}\nconst BACKEND = 'http://fastapi_backend:8000';\nconst OLLAMA = 'http://ollama:11434';\nconst MODEL = 'qwen2.5-coder:7b';\n\nasync function callBackend(path, payload) {\n  return await this.helpers.httpRequest({\n    method: 'POST',\n    url: BACKEND + path,\n    body: payload,\n    json: true,\n  });\n}\n\nasync function callOllama(prompt) {\n  const r = await this.helpers.httpRequest({\n    method: 'POST',\n    url: OLLAMA + '/api/generate',\n    body: { model: MODEL, prompt: prompt, stream: false, format: 'json' },\n    json: true,\n    timeout: 180000,\n  });\n  return JSON.parse(r.response || '{}');\n}\n\nconst charts = [];\nconst failedTitles = [];\nfor (const spec of input.specs) {\n  let sql = '', ok = false, err = '', cols = [], sample = [];\n  for (let attempt = 0; attempt < 3; attempt++) {\n    const sqlPromptResp = await callBackend('/internal/sql-prompt', {\n      goal: spec.goal,\n      chart_type: spec.chart_type || '',\n      schema_text: input.schema_text,\n      prev_sql: sql,\n      prev_err: err,\n    });\n    const rawOut = await callOllama(sqlPromptResp.prompt);\n    const rawSql = (rawOut && rawOut.sql) || '';\n    const validated = await callBackend('/internal/process-sql-attempt', {\n      schema_name: input.db_path,\n      chart_type: spec.chart_type || '',\n      raw_sql: rawSql,\n    });\n    sql = validated.sql;\n    ok = validated.ok;\n    err = validated.error || '';\n    cols = validated.columns;\n    sample = validated.sample;\n    if (ok && sql) break;\n  }\n  if (!ok || !sql) { failedTitles.push(spec.title); continue; }\n  const finalized = await callBackend('/internal/finalize-chart', {\n    title: spec.title,\n    sql: sql,\n    chart_type: spec.chart_type || '',\n    columns: cols,\n    sample: sample,\n    user_prompt: input.user_prompt,\n  });\n  charts.push({ title: finalized.title, sql: sql, display: finalized.display, columns: cols });\n}\n\nconst dateColResp = await this.helpers.httpRequest({\n  method: 'GET',\n  url: BACKEND + '/internal/date-column?schema_name=' + encodeURIComponent(input.db_path),\n  json: true,\n});\n\nreturn [{\n  json: {\n    charts: charts,\n    db_path: input.db_path,\n    user_prompt: input.user_prompt,\n    date_columns: dateColResp.date_columns || [],\n    requested: input.specs.length,\n    failed: input.specs.length - charts.length,\n    failed_titles: failedTitles,\n  },\n}];"
       },
       "id": "bbbb2222-0000-0000-0000-000000000002",
       "name": "Generuj SQL i Zbierz Wykresy",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1008,
-        880
+        1184,
+        896
       ]
     },
     {
@@ -365,8 +336,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        512,
-        128
+        784,
+        704
       ]
     },
     {
@@ -379,8 +350,8 @@
       "type": "@n8n/n8n-nodes-langchain.lmOllama",
       "typeVersion": 1,
       "position": [
-        1264,
-        528
+        800,
+        1072
       ],
       "credentials": {
         "ollamaApi": {
@@ -399,8 +370,8 @@
       "type": "@n8n/n8n-nodes-langchain.chainLlm",
       "typeVersion": 1.6,
       "position": [
-        976,
-        432
+        928,
+        704
       ]
     },
     {
@@ -412,8 +383,36 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1328,
-        976
+        992,
+        1056
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { error: 'Model nie wygenerowal poprawnego SQL dla zadnego z zaplanowanych wykresow (po probach retry). Sprobuj prostszy cel albo inne typy wykresow.' } }];"
+      },
+      "id": "llllcccc-0000-0000-0000-00000000000c",
+      "name": "Zbuduj Blad Brak Wykresow",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        912
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ error: $json.error }) }}",
+        "options": {}
+      },
+      "id": "mmmmdddd-0000-0000-0000-00000000000d",
+      "name": "Odpowiedz Blad",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1648,
+        912
       ]
     },
     {
@@ -422,7 +421,8 @@
           "options": {
             "caseSensitive": true,
             "leftValue": "",
-            "typeValidation": "strict"
+            "typeValidation": "strict",
+            "version": 1
           },
           "conditions": [
             {
@@ -440,12 +440,12 @@
         "options": {}
       },
       "id": "gggg7777-0000-0000-0000-000000000007",
-      "name": "Trzeba Retry Planu?",
+      "name": "Czy Ponowić Plan?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        1632,
-        960
+        1168,
+        1056
       ]
     },
     {
@@ -453,12 +453,12 @@
         "jsCode": "const base = $('Przetworz Plan').item.json;\nconst prompt = base.plan_prompt + \"\\nUWAGA: POPRZEDNI PLAN byl w obcym jezyku. Pola 'title' i 'goal' MUSZA byc napisane WYLACZNIE po polsku.\";\nreturn [{ json: { prompt } }];"
       },
       "id": "hhhh8888-0000-0000-0000-000000000008",
-      "name": "Zbuduj Prompt Retry Planu",
+      "name": " Zbuduj Prompt Ponownego Planu",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1744,
-        656
+        1344,
+        1056
       ]
     },
     {
@@ -467,12 +467,12 @@
         "text": "={{ $json.prompt }}"
       },
       "id": "iiii9999-0000-0000-0000-000000000009",
-      "name": "LLM Chain: Plan Retry",
+      "name": "LLM Chain: Ponowny Plan",
       "type": "@n8n/n8n-nodes-langchain.chainLlm",
       "typeVersion": 1.6,
       "position": [
-        960,
-        608
+        704,
+        880
       ]
     },
     {
@@ -480,12 +480,12 @@
         "jsCode": "const chainText = $json.text || '';\nconst cleaned = chainText.replace(/```json/gi, '').replace(/```/g, '').trim();\nlet rawPlan;\ntry { rawPlan = JSON.parse(cleaned); } catch (e) { rawPlan = { charts: [] }; }\nconst upstream = $('Przetworz Plan').item.json;\nconst resp = await this.helpers.httpRequest({\n  method: 'POST',\n  url: 'http://fastapi_backend:8000/internal/process-plan',\n  body: {\n    raw_plan: rawPlan,\n    requested_types: [],\n    n_charts: (upstream.specs && upstream.specs.length) || 3,\n    user_prompt: upstream.user_prompt,\n    is_retry: true,\n  },\n  json: true,\n});\nreturn [{ json: {\n  specs: resp.specs,\n  db_path: upstream.db_path,\n  schema_text: upstream.schema_text,\n  user_prompt: upstream.user_prompt,\n} }];"
       },
       "id": "jjjjaaaa-0000-0000-0000-00000000000a",
-      "name": "Przetworz Plan Retry",
+      "name": "Przetworz Ponowny Plan",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1392,
-        624
+        1024,
+        896
       ]
     },
     {
@@ -512,42 +512,30 @@
         "options": {}
       },
       "id": "kkkkbbbb-0000-0000-0000-00000000000b",
-      "name": "Sa Wykresy?",
+      "name": "Czy Są Wykresy",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        1792,
-        320
+        1344,
+        896
       ]
     },
     {
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "language": "javaScript",
-        "jsCode": "return [{ json: { error: 'Model nie wygenerowal poprawnego SQL dla zadnego z zaplanowanych wykresow (po probach retry). Sprobuj prostszy cel albo inne typy wykresow.' } }];"
-      },
-      "id": "llllcccc-0000-0000-0000-00000000000c",
-      "name": "Zbuduj Blad Brak Wykresow",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        2048,
-        400
-      ]
-    },
-    {
-      "parameters": {
-        "respondWith": "json",
-        "responseBody": "={{ JSON.stringify({ error: $json.error }) }}",
+        "method": "POST",
+        "url": "http://metabase:3000/api/session",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"username\": \"szymonforstkl3trgwitam@gmail.com\", \"password\": \"Szym0nMetabase\"}",
         "options": {}
       },
-      "id": "mmmmdddd-0000-0000-0000-00000000000d",
-      "name": "Odpowiedz Blad",
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1,
+      "id": "580ff816-f284-42c3-b1d7-4927348943eb",
+      "name": "Logowanie Metabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
       "position": [
-        2304,
-        400
+        752,
+        16
       ]
     }
   ],
@@ -557,17 +545,6 @@
         [
           {
             "node": "Zbuduj Prompt Planu",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Metabase Login": {
-      "main": [
-        [
-          {
-            "node": "Pobierz Bazy",
             "type": "main",
             "index": 0
           }
@@ -728,7 +705,7 @@
       "main": [
         [
           {
-            "node": "Sa Wykresy?",
+            "node": "Czy Są Wykresy",
             "type": "main",
             "index": 0
           }
@@ -755,7 +732,7 @@
             "index": 0
           },
           {
-            "node": "LLM Chain: Plan Retry",
+            "node": "LLM Chain: Ponowny Plan",
             "type": "ai_languageModel",
             "index": 0
           }
@@ -777,18 +754,29 @@
       "main": [
         [
           {
-            "node": "Trzeba Retry Planu?",
+            "node": "Czy Ponowić Plan?",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Trzeba Retry Planu?": {
+    "Zbuduj Blad Brak Wykresow": {
       "main": [
         [
           {
-            "node": "Zbuduj Prompt Retry Planu",
+            "node": "Odpowiedz Blad",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Czy Ponowić Plan?": {
+      "main": [
+        [
+          {
+            "node": " Zbuduj Prompt Ponownego Planu",
             "type": "main",
             "index": 0
           }
@@ -802,29 +790,29 @@
         ]
       ]
     },
-    "Zbuduj Prompt Retry Planu": {
+    " Zbuduj Prompt Ponownego Planu": {
       "main": [
         [
           {
-            "node": "LLM Chain: Plan Retry",
+            "node": "LLM Chain: Ponowny Plan",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "LLM Chain: Plan Retry": {
+    "LLM Chain: Ponowny Plan": {
       "main": [
         [
           {
-            "node": "Przetworz Plan Retry",
+            "node": "Przetworz Ponowny Plan",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Przetworz Plan Retry": {
+    "Przetworz Ponowny Plan": {
       "main": [
         [
           {
@@ -835,11 +823,11 @@
         ]
       ]
     },
-    "Sa Wykresy?": {
+    "Czy Są Wykresy": {
       "main": [
         [
           {
-            "node": "Metabase Login",
+            "node": "Logowanie Metabase",
             "type": "main",
             "index": 0
           }
@@ -853,11 +841,11 @@
         ]
       ]
     },
-    "Zbuduj Blad Brak Wykresow": {
+    "Logowanie Metabase": {
       "main": [
         [
           {
-            "node": "Odpowiedz Blad",
+            "node": "Pobierz Bazy",
             "type": "main",
             "index": 0
           }
